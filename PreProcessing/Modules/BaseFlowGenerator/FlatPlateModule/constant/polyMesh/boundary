@@ -1,0 +1,88 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2312                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    arch        "LSB;label=32;scalar=64";
+    class       polyBoundaryMesh;
+    location    "constant/polyMesh";
+    object      boundary;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+8
+(
+    top
+    {
+        type            patch;
+        nFaces          308;
+        startFace       30412;
+    }
+
+    inlet
+    {
+        type            patch;
+        inGroups        1 ( patch );
+        nFaces          80;
+        startFace       30720;
+    }
+
+    outlet
+    {
+        type            patch;
+        inGroups        1 ( patch );
+        nFaces          80;
+        startFace       30800;
+    }
+
+    plate
+    {
+        type            wall;
+        inGroups        1 ( wall );
+        nFaces          308;
+        startFace       30880;
+    }
+
+    front_half0
+    {
+        type            cyclic;
+        nFaces          3080;
+        startFace       31188;
+        neighbourPatch  back_half0;
+    }
+
+    front_half1
+    {
+        type            cyclic;
+        nFaces          3080;
+        startFace       34268;
+        neighbourPatch  back_half1;
+    }
+
+    back_half0
+    {
+        type            cyclic;
+        nFaces          3080;
+        startFace       37348;
+        neighbourPatch  front_half0;
+    }
+
+    back_half1
+    {
+        type            cyclic;
+        nFaces          3080;
+        startFace       40428;
+        neighbourPatch  front_half1;
+    }
+
+)
+
+
+// ************************************************************************* //

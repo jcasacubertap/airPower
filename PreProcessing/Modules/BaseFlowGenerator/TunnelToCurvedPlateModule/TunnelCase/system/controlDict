@@ -1,0 +1,181 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  1.6                                   |
+|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     simpleFoam;
+
+startFrom       startTime;
+
+startTime       2;
+
+stopAt          endTime;
+
+endTime         10000;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   100; //#calc "$endTime / 1000" ;
+
+purgeWrite      0;
+
+writeFormat     ascii;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions
+{
+    solverInfo
+    {
+        type  solverInfo;
+        libs  ("libutilityFunctionObjects.so");
+        writeControl  timeStep;   // write every SIMPLE iteration
+        writeInterval 1;
+
+        fields (U p);             // track these fields' residuals
+    }
+    
+    readPressure
+    {
+        type            readFields;
+        libs            (fieldFunctionObjects);
+        fields          (p U); 
+    }
+    
+    topFlowSample
+    {
+        type            surfaces;
+        libs            (sampling);
+        writeControl    writeTime;
+        surfaceFormat   vtk;         // Output as .vtk for ParaView
+        fields          (p U);
+
+        surfaces
+        {
+            receptorTopSampled
+            {
+                type            sampledTriSurfaceMesh;
+                surface         "receptorTopGeometry.stl";    // Must be in constant/triSurface/
+                source          cells;
+                interpolate     true;                         // Smooths data onto the STL triangles
+            }
+        }
+    }
+
+    airfoilPressure
+    {
+        type            surfaces;
+        libs            (sampling);
+        writeControl    writeTime;
+        surfaceFormat   raw;
+        interpolationScheme cellPoint;
+        fields          (p);
+
+        surfaces
+        {
+            airfoil
+            {
+                type        patch;
+                patches     (airfoil);
+            }
+        }
+    }
+}
+   
+
+// yPlus
+//  {
+//  type                 yPlus;
+//  libs                 ("libfieldFunctionObjects.so");
+//  executeControl       writeTime;
+//  writeControl         writeTime;
+//  }
+
+//solverInfo
+//{
+//    type  solverInfo;
+//    libs  ("libutilityFunctionObjects.so");
+//    writeControl  timeStep;   // write every SIMPLE iteration
+//    writeInterval 1;
+//
+//    fields (U p);             // track these fields' residuals
+//}
+
+//  distToFoil
+//  {
+//      type            surfaceDistance;
+//      libs            ("libfieldFunctionObjects.so");
+//      enabled         true;
+//
+//      distanceMode    nearest;      // nearest-point distance
+//      writeFields     true;         // write a volScalarField
+//
+//      geometry
+//      {
+//          airfoil.stl
+//          {
+//              type  triSurfaceMesh;
+//              triSurfaceMesh airfoil.eMesh;        
+//          }
+//      };
+// }
+
+//wallShearStress
+//{
+//type                 wallShearStress;
+//libs                 ("libfieldFunctionObjects.so");
+//executeControl       writeTime;
+//writeControl         writeTime;
+//}
+
+//wallPressure
+//{
+//type                 surfaces;
+//functionObjectLibs   ("libsampling.so");
+//outputControl        outputTime;
+//surfaceFormat        foam;
+//interpolationScheme  cell;
+
+//fields (p);
+//surfaces
+//(
+// flatPlate
+//{
+// type patch;
+// patches (flatPlate);
+// interpolate true;
+// triangulate false;
+//}
+// upperWall
+//{
+// type patch;
+// patches (upperWall);
+// interpolate true;
+// triangulate false;
+//}
+//);
+//} 
+
+// ************************************************************************* //
