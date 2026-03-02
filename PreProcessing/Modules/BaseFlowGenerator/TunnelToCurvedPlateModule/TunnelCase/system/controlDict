@@ -19,7 +19,7 @@ application     simpleFoam;
 
 startFrom       startTime;
 
-startTime       0;
+startTime       2;
 
 stopAt          endTime;
 

@@ -1,6 +1,12 @@
 #!/bin/sh
 
-decomposePar
+# Back up parametric initial condition files
+cp -r 2 2.bak
+
+decomposePar -time 2
 mpirun -np 8 --oversubscribe simpleFoam -parallel
 reconstructPar
 
+# Restore parametric initial condition files
+rm -r 2
+mv 2.bak 2
