@@ -16,7 +16,10 @@ FoamFile
 
 #include "../constant/inputParam"
 
-kInlet          #calc "1.5 * pow($flowParam.freeStreamVelocity * $flowParam.turbulenceIntensity, 2)";
+Uinf            ${flowParam.freeStreamVelocity};
+Ti              ${flowParam.turbulenceIntensity};
+
+kInlet          #calc "1.5 * pow($Uinf * $Ti, 2)";
 
 dimensions      [0 2 -2 0 0 0 0];
 

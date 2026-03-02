@@ -16,7 +16,11 @@ FoamFile
 
 #include "../constant/inputParam"
 
-omegaInlet      #calc "sqrt(1.5 * pow($flowParam.freeStreamVelocity * $flowParam.turbulenceIntensity, 2)) / (pow(0.09, 0.25) * $flowParam.turbLengthScale)";
+Uinf            ${flowParam.freeStreamVelocity};
+Ti              ${flowParam.turbulenceIntensity};
+Lt              ${flowParam.turbLengthScale};
+
+omegaInlet      #calc "sqrt(1.5 * pow($Uinf * $Ti, 2)) / (pow(0.09, 0.25) * $Lt)";
 
 dimensions      [0 0 -1 0 0 0 0];
 

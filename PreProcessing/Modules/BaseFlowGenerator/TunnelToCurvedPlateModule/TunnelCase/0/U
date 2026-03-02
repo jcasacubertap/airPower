@@ -16,16 +16,18 @@ FoamFile
 
 #include "../constant/inputParam"
 
+Uinf            ${flowParam.freeStreamVelocity};
+
 dimensions      [0 1 -1 0 0 0 0];
 
-internalField   uniform (${flowParam.freeStreamVelocity} 0 0);
+internalField   uniform ($Uinf 0 0);
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform (${flowParam.freeStreamVelocity} 0 0);
+        value           $internalField;
     }
     outlet
     {
