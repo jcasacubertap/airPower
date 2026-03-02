@@ -15,10 +15,10 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-#include "../system/inputParameters"
+#include "inputParam"
 
 transportModel  Newtonian;
 
-nu $freeStreamViscosity;
+nu ${flowParam.freeStreamViscosity};
 
 // ************************************************************************* //

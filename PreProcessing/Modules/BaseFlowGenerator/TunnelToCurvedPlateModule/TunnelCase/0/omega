@@ -14,21 +14,26 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+#include "../constant/inputParam"
+
+omegaInlet      #calc "sqrt(1.5 * pow($flowParam.freeStreamVelocity * $flowParam.turbulenceIntensity, 2)) / (pow(0.09, 0.25) * $flowParam.turbLengthScale)";
+
 dimensions      [0 0 -1 0 0 0 0];
 
-internalField   uniform 0.94;
+internalField   uniform $omegaInlet;
 
 boundaryField
 {
     inlet
     {
-        type            inletOutlet;
-        inletValue      $internalField;
+        type            fixedValue;
         value           $internalField;
     }
     outlet
     {
-        type            zeroGradient;
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
     } 
     airfoil
     {

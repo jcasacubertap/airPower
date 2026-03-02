@@ -14,7 +14,9 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-kInlet          0.1;
+#include "../constant/inputParam"
+
+kInlet          #calc "1.5 * pow($flowParam.freeStreamVelocity * $flowParam.turbulenceIntensity, 2)";
 
 dimensions      [0 2 -2 0 0 0 0];
 
@@ -24,16 +26,14 @@ boundaryField
 {
     inlet
     {
-        type            inletOutlet;
-        inletValue      $internalField;
+        type            fixedValue;
         value           $internalField;
     }
     outlet
     {
-        type            zeroGradient;
-        // type            inletOutlet;
-        // inletValue      $internalField;
-        // value           $internalField;
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
     } 
     airfoil
     {

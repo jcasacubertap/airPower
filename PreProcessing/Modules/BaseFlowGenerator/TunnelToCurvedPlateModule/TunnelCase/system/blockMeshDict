@@ -14,19 +14,32 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-#include "inputParameters"
+#include "../constant/inputParam"
 
 scale 0.001;
 
+// Flat plate length (defined first, used in #calc below)
+     xfp ${flowParam.flatPlateLength};
 // Middle-left coordinates
-     xor #calc "-0.5*$flatPlateLength";
+     xor #calc "-0.5*$xfp";
      yor 0;
 // Inlet (top outer) half height
-     yi  $tunnelInletHeight;
+     yi  ${flowParam.tunnelInletHeight};
 // Outlet (top outer) half height
-     yo  $tunnelOutletHeight;
-// Flat plate length
-     xfp $flatPlateLength;
+     yo  ${flowParam.tunnelOutletHeight};
+// z-planes
+     z0  ${flowParam.z0};
+     z1  ${flowParam.z1};
+// Grid partitions
+     Nx  ${flowParam.Nx};
+     Ny  ${flowParam.Ny};
+// BSpline control points
+     xcp1 ${flowParam.xcp1};
+     ycp1 ${flowParam.ycp1};
+     xcp2 ${flowParam.xcp2};
+     ycp2 ${flowParam.ycp2};
+     xcp3 ${flowParam.xcp3};
+     ycp3 ${flowParam.ycp3};
 
 vertices
 (

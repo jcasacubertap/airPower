@@ -14,22 +14,21 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-#include "../system/inputParameters"
+#include "../constant/inputParam"
 
 dimensions      [0 1 -1 0 0 0 0];
 
-internalField   uniform ($freeStreamVelocity 0 0);
+internalField   uniform (${flowParam.freeStreamVelocity} 0 0);
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform ($freeStreamVelocity 0 0);
+        value           uniform (${flowParam.freeStreamVelocity} 0 0);
     }
     outlet
     {
-        //type            zeroGradient;
         type            inletOutlet;
         inletValue      $internalField;
         value           $internalField;
