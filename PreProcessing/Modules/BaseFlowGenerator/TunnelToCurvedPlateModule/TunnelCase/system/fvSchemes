@@ -25,6 +25,7 @@ ddtSchemes
 gradSchemes
 {
     default         Gauss linear;
+    grad(U)         cellLimited Gauss linear 1;
 }
 // Gauss linear: computes face values with linear interpolation
 // from neighbouring cell centers -> therefore it's 2nd-order accurate

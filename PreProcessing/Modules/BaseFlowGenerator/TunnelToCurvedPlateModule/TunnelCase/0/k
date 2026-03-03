@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2312                                 |
+|  \\    /   O peration     | Version:  v2412                                 |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
@@ -37,7 +37,7 @@ boundaryField
         type            inletOutlet;
         inletValue      $internalField;
         value           $internalField;
-    } 
+    }
     airfoil
     {
         type            kqRWallFunction;
@@ -62,6 +62,5 @@ boundaryField
         value           $internalField;
     }
 }
-
 
 // ************************************************************************* //

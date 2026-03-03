@@ -31,7 +31,7 @@ writeControl    timeStep;
 
 writeInterval   100; //#calc "$endTime / 1000" ;
 
-purgeWrite      0;
+purgeWrite      3;
 
 writeFormat     ascii;
 
@@ -103,79 +103,5 @@ functions
         }
     }
 }
-   
-
-// yPlus
-//  {
-//  type                 yPlus;
-//  libs                 ("libfieldFunctionObjects.so");
-//  executeControl       writeTime;
-//  writeControl         writeTime;
-//  }
-
-//solverInfo
-//{
-//    type  solverInfo;
-//    libs  ("libutilityFunctionObjects.so");
-//    writeControl  timeStep;   // write every SIMPLE iteration
-//    writeInterval 1;
-//
-//    fields (U p);             // track these fields' residuals
-//}
-
-//  distToFoil
-//  {
-//      type            surfaceDistance;
-//      libs            ("libfieldFunctionObjects.so");
-//      enabled         true;
-//
-//      distanceMode    nearest;      // nearest-point distance
-//      writeFields     true;         // write a volScalarField
-//
-//      geometry
-//      {
-//          airfoil.stl
-//          {
-//              type  triSurfaceMesh;
-//              triSurfaceMesh airfoil.eMesh;        
-//          }
-//      };
-// }
-
-//wallShearStress
-//{
-//type                 wallShearStress;
-//libs                 ("libfieldFunctionObjects.so");
-//executeControl       writeTime;
-//writeControl         writeTime;
-//}
-
-//wallPressure
-//{
-//type                 surfaces;
-//functionObjectLibs   ("libsampling.so");
-//outputControl        outputTime;
-//surfaceFormat        foam;
-//interpolationScheme  cell;
-
-//fields (p);
-//surfaces
-//(
-// flatPlate
-//{
-// type patch;
-// patches (flatPlate);
-// interpolate true;
-// triangulate false;
-//}
-// upperWall
-//{
-// type patch;
-// patches (upperWall);
-// interpolate true;
-// triangulate false;
-//}
-//);
-//} 
 
 // ************************************************************************* //

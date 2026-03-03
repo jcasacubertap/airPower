@@ -54,7 +54,7 @@ flowParam
 //4.- Turbulence Parameters
 
  turbulenceIntensity   0.0003;        //[-] (eg, I = 0.03%, is I = 0.0003, LTT of TU Delft) (k = 1.5 * (I U)^2)
- turbLengthScale       0.009;         //[m] (freestream eddy size)
+ turbLengthScale       0.009;         //[m] (freestream eddy size) (omega = (k^0.5) / (0.09^0.25 L))
 
 //5.- BSpline Control Points
 
