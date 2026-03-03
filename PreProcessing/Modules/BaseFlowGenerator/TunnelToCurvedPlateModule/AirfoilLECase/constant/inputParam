@@ -1,0 +1,37 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      inputParam;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+//Boundaries information
+Upinlet
+{
+//Inflow parameters
+    Uinf        12.417927660828887;                  // chordwise velocity
+    Winf        -17.570475447234216;                 // spanwise velocity
+    xInlet      0.046694057793992;                  // inflow distance from virtual LE  
+//Top pressure parameters (coefficient of polinomyal)    
+    pa4         0.004709401639645;
+    pa3         0.059408065736933;
+    pa2         0.245222700832888;
+    pa1         0.657504955493668;
+    pa0         2.006271563747756;
+}
+
+//System information    
+freeStreamViscosity   1.456610719354608e-5;    //[m^2s^1]
+
+// Regarding the top BC, set the polynomial evolution along x in 0/p
+
+// ************************************************************************* //
