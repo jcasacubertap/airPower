@@ -33,8 +33,8 @@ domainSize
     xiPressureOutlet    0.10;   // pressure (lower) outlet position
 
     // Wall-normal (radial) band heights [mm]
-    hBL                 480;    // boundary-layer band height along normal
-    hFar                480;    // far-field band height along normal
+    hBL                  240;    // boundary-layer band height along normal
+    hFar                 240;    // far-field band height along normal
 
     // Spanwise extent [mm]
     zWidth              2;
@@ -55,7 +55,7 @@ gridResolution
     nxTotal             500;
 
     // Cells in the wall-normal direction
-    nyBL                240;     // cells in boundary-layer blocks
+    nyBL                 60;     // cells in boundary-layer blocks
     // nyFar is auto-computed to match the BL outer cell size
 
     // Cells in the spanwise direction

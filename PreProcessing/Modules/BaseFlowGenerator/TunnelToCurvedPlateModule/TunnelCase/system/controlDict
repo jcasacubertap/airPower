@@ -54,7 +54,7 @@ functions
         writeControl  timeStep;   // write every SIMPLE iteration
         writeInterval 1;
 
-        fields (U p);             // track these fields' residuals
+        fields (U p k omega);     // track these fields' residuals
     }
     
     readPressure

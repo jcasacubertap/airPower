@@ -19,6 +19,6 @@ FoamFile
 
 transportModel  Newtonian;
 
-nu  $freeStreamViscosity;
+nu  ${Upinlet.freeStreamViscosity};
 
 // ************************************************************************* //

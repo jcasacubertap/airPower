@@ -29,15 +29,19 @@ boundaryField
         type            zeroGradient;
     }
     suctionOutlet
-    {
-        type            fixedValue;
-        value           uniform 0;
-    }
+{
+    type            timeVaryingMappedFixedValue;
+    offset          0;
+    setAverage      false;
+    value           uniform 0;
+}
     pressureOutlet
-    {
-        type            fixedValue;
-        value           uniform 0;
-    }
+{
+    type            timeVaryingMappedFixedValue;
+    offset          0;
+    setAverage      false;
+    value           uniform 0;
+}
     front
     {
         type            empty;

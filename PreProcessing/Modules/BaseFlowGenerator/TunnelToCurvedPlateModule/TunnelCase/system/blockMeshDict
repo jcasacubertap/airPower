@@ -155,20 +155,20 @@ boundary
 
     right
     {
-        type            symmetryPlane;
+        type            empty;
         faces
         (
-           (0 2 4 6)         
+           (0 2 4 6)
            (8 10 0 2)
         );
     }
 
     left
     {
-        type            symmetryPlane;
+        type            empty;
         faces
         (
-           (1 3 5 7)         
+           (1 3 5 7)
            (9 11 1 3)
         );
     }

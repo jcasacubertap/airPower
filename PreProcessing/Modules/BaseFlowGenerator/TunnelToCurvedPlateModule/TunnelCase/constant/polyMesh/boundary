@@ -46,15 +46,15 @@ FoamFile
     }
     right
     {
-        type            symmetryPlane;
-        inGroups        1(symmetryPlane);
+        type            empty;
+        inGroups        1(empty);
         nFaces          25200;
         startFace       126660;
     }
     left
     {
-        type            symmetryPlane;
-        inGroups        1(symmetryPlane);
+        type            empty;
+        inGroups        1(empty);
         nFaces          25200;
         startFace       151860;
     }

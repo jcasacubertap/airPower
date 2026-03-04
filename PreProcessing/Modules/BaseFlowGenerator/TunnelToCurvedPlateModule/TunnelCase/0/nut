@@ -44,11 +44,11 @@ boundaryField
     }
     right
     {
-        type            symmetryPlane;
+        type            empty;
     }
     left
     {
-        type            symmetryPlane;
+        type            empty;
     }
     airfoil
     {

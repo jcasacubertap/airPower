@@ -46,11 +46,11 @@ boundaryField
     }
     left
     {
-        type            symmetryPlane;
+        type            empty;
     }
     right
     {
-        type            symmetryPlane;
+        type            empty;
     }
     upperWall
     {
