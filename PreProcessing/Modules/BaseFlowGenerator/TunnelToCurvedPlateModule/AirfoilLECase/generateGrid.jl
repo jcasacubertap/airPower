@@ -168,6 +168,30 @@ end
 eta_upper(xi::Float64) =  interp1(XI_DATA, ETA_DATA, xi)
 eta_lower(xi::Float64) = -interp1(XI_DATA, ETA_DATA, xi)
 
+"""Cubic Lagrange interpolation using 4 nearest points from a sorted table."""
+function interp1_cubic(xd::Vector{Float64}, yd::Vector{Float64}, xq::Float64)::Float64
+    n = length(xd)
+    xq ≤ xd[1]  && return yd[1]
+    xq ≥ xd[n]  && return yd[n]
+    k = 1
+    for i in 1:n-1
+        if xd[i] ≤ xq ≤ xd[i+1]; k = i; break; end
+    end
+    i0 = clamp(k - 1, 1, n - 3)
+    val = 0.0
+    for i in 0:3
+        basis = 1.0
+        for j in 0:3
+            j != i && (basis *= (xq - xd[i0+j]) / (xd[i0+i] - xd[i0+j]))
+        end
+        val += yd[i0+i] * basis
+    end
+    return val
+end
+
+upper_pt_cubic(xi::Float64) = to_global(xi,  interp1_cubic(XI_DATA, ETA_DATA, xi))
+lower_pt_cubic(xi::Float64) = to_global(xi, -interp1_cubic(XI_DATA, ETA_DATA, xi))
+
 """
     to_global(xi, eta) → (x, y)  [mm]
 
@@ -199,6 +223,18 @@ function surface_normal(xi::Float64, side::Symbol; δ::Float64=1e-5)
     x1, y1 = pt_fn(min(1.0, xi + δ))
     tx, ty = x1 - x0, y1 - y0
     # +90° for upper (outward = up), −90° for lower (outward = down)
+    nx, ny = side == :upper ? (-ty, tx) : (ty, -tx)
+    mag = sqrt(nx^2 + ny^2)
+    mag < 1e-15 && return side == :upper ? (0.0, 1.0) : (0.0, -1.0)
+    return (nx / mag, ny / mag)
+end
+
+"""Cubic-interpolation version of surface_normal."""
+function surface_normal_cubic(xi::Float64, side::Symbol; δ::Float64=1e-5)
+    pt_fn = side == :upper ? upper_pt_cubic : lower_pt_cubic
+    x0, y0 = pt_fn(max(0.0, xi - δ))
+    x1, y1 = pt_fn(min(1.0, xi + δ))
+    tx, ty = x1 - x0, y1 - y0
     nx, ny = side == :upper ? (-ty, tx) : (ty, -tx)
     mag = sqrt(nx^2 + ny^2)
     mag < 1e-15 && return side == :upper ? (0.0, 1.0) : (0.0, -1.0)
@@ -498,8 +534,9 @@ function compute_cell_distribution(sts::Vector{Station})::Tuple{Vector{Int}, Vec
     best_gx_seg = ones(Ns)
 
     # ---- 3-D search over (nx_suc, nt_up, nt_lo) ----
-    nx_suc_lo = max(1, round(Int, arc_suc / dx_nom) - 30)
-    nx_suc_hi = round(Int, arc_suc / dx_nom) + 30
+    search_half = max(30, round(Int, NX_TOTAL / 12))
+    nx_suc_lo = max(1, round(Int, arc_suc / dx_nom) - search_half)
+    nx_suc_hi = round(Int, arc_suc / dx_nom) + search_half
 
     for nx_suc in nx_suc_lo:nx_suc_hi
         dx_suc = arc_suc / nx_suc
@@ -527,7 +564,7 @@ function compute_cell_distribution(sts::Vector{Station})::Tuple{Vector{Int}, Vec
                     push!(nx_aup, nt_up);  push!(gx_aup, gx)
                     d0 *= gx
                 else
-                    frac   = arc_k / total_grad_up_arc
+                    frac   = clamp(arc_k / total_grad_up_arc, 0.0, 1.0)
                     tgt_gx = (1.0 / GRAD_ARCH)^frac
                     avg  = d0 * (1.0 + tgt_gx) / 2.0
                     nest = max(2, round(Int, arc_k / avg))
@@ -553,7 +590,7 @@ function compute_cell_distribution(sts::Vector{Station})::Tuple{Vector{Int}, Vec
             graded_lo = has_trans_lo ? i_alo_vec[1:end-1] : i_alo_vec
             for k in graded_lo
                 arc_k = arcs[k]
-                frac   = arc_k / total_grad_lo_arc
+                frac   = clamp(arc_k / total_grad_lo_arc, 0.0, 1.0)
                 tgt_gx = GRAD_ARCH^frac
                 avg  = d0 * (1.0 + tgt_gx) / 2.0
                 nest = max(2, round(Int, arc_k / avg))
@@ -751,15 +788,94 @@ struct SplineEdge
     v0   :: Int                            # start vertex (0-based)
     v1   :: Int                            # end   vertex (0-based)
     pts  :: Vector{NTuple{3,Float64}}      # intermediate points
+    etype :: String                        # "spline" or "polyLine"
 end
+
+"""
+Return `n-1` interior ξ values equally spaced by arc length between
+`xi_from` and `xi_to` on the given surface side.  When `H > 0` the arc
+length is measured along the **offset curve** (surface + H·normal) so that
+the resulting spline knots give uniform cells at the actual radial height,
+not just at the wall.
+"""
+function resample_arc(xi_from::Float64, xi_to::Float64, n::Int,
+                      side::Symbol, H::Float64=0.0)::Vector{Float64}
+    pt_fn = side == :upper ? upper_pt : lower_pt
+    xi_lo, xi_hi = minmax(xi_from, xi_to)
+
+    # Gather M3J data points in [xi_lo, xi_hi] plus endpoints
+    xis = Float64[]
+    for xi_d in XI_DATA
+        if xi_lo ≤ xi_d ≤ xi_hi
+            push!(xis, xi_d)
+        end
+    end
+    if isempty(xis) || abs(xis[1] - xi_lo) > 1e-12
+        push!(xis, xi_lo)
+    end
+    if isempty(xis) || abs(xis[end] - xi_hi) > 1e-12
+        push!(xis, xi_hi)
+    end
+    sort!(unique!(xis))
+
+    # If C-path direction is decreasing ξ (upper surface), reverse
+    going_down = xi_from > xi_to
+    if going_down
+        reverse!(xis)
+    end
+
+    # Compute physical points at offset height H
+    np = length(xis)
+    ox = zeros(np)
+    oy = zeros(np)
+    for k in 1:np
+        px, py = pt_fn(xis[k])
+        if H > 0.0
+            nx, ny = surface_normal(max(xis[k], 1e-6), side)
+            ox[k] = px + H * nx
+            oy[k] = py + H * ny
+        else
+            ox[k] = px
+            oy[k] = py
+        end
+    end
+
+    # Cumulative arc length along the offset curve
+    cum = zeros(np)
+    for k in 2:np
+        cum[k] = cum[k-1] + sqrt((ox[k]-ox[k-1])^2 + (oy[k]-oy[k-1])^2)
+    end
+    total_arc = cum[end]
+
+    # Interpolate n-1 interior points at equal arc-length intervals
+    result = Float64[]
+    for i in 1:n-1
+        target = i * total_arc / n
+        for j in 2:np
+            if cum[j] ≥ target - 1e-12
+                t = (target - cum[j-1]) / (cum[j] - cum[j-1])
+                push!(result, xis[j-1] + t * (xis[j] - xis[j-1]))
+                break
+            end
+        end
+    end
+    return result
+end
+
+# Arch blocks use polyLine (piecewise-linear edges) which need many
+# knots to trace the curved surface.  Straight blocks use Catmull-Rom
+# splines where fewer knots work well (too many causes overshoot).
+const N_RESAMPLE_ARCH = max(50, round(Int, NX_TOTAL / 8))
+const N_RESAMPLE_STRAIGHT = 10
 
 """
 Compute intermediate spline points between two adjacent stations
 at a given radial offset `H` and z-coordinate `zval`.
 
-For accuracy the intermediate ξ values are taken from the actual M3J data
-points that fall strictly between the two station ξ values.  This ensures
-the airfoil surface splines pass through the real airfoil coordinates.
+Interior ξ values are resampled at equal arc-length intervals so that
+OpenFOAM's Catmull-Rom parameterization produces uniform cell sizes
+across block interfaces.  Arch blocks keep original M3J data points
+to preserve LE curvature.
 """
 function spline_between(sts::Vector{Station}, si::Int, sj::Int,
                         H::Float64, zval::Float64)::Vector{NTuple{3,Float64}}
@@ -769,17 +885,38 @@ function spline_between(sts::Vector{Station}, si::Int, sj::Int,
     # Determine which surface side we are on
     on_lower = (a.side == :lower || (a.side == :le && b.side == :lower))
 
-    # Collect M3J ξ data points strictly between the two station ξ values.
-    # C-path goes from higher ξ → lower ξ on the upper surface,
-    # and from lower ξ → higher ξ on the lower surface.
+    # Arch blocks at the wall (H≈0) keep the original M3J data points to
+    # preserve the accurate LE curvature.  At outer radial levels (H>0),
+    # all blocks use arc-length resampling at the offset height — this
+    # avoids the fragile dependency on which M3J points happen to fall
+    # inside each block (which changes with XI_ARCH and other parameters).
+    is_arch_wall = (max(a.xi, b.xi) <= XI_ARCH) && (H < 1e-12)
+
     xi_lo = min(a.xi, b.xi)
     xi_hi = max(a.xi, b.xi)
 
-    xi_interior = Float64[]
-    for xi_d in XI_DATA
-        if xi_lo < xi_d < xi_hi
-            push!(xi_interior, xi_d)
+    if is_arch_wall
+        # Original M3J data points only — cubic surface evaluation (below)
+        # provides the LE curvature; extra midpoints would constrain the
+        # Catmull-Rom to the piecewise-linear shape and reduce smoothness.
+        xi_interior = Float64[]
+        for xi_d in XI_DATA
+            if xi_lo < xi_d < xi_hi
+                push!(xi_interior, xi_d)
+            end
         end
+    else
+        # Arc-length resampling at offset height H for uniform knot spacing
+        # Arch blocks need dense knots (polyLine); straight blocks need few (spline)
+        in_arch_h = max(a.xi, b.xi) <= XI_ARCH
+        n_base = in_arch_h ? N_RESAMPLE_ARCH : N_RESAMPLE_STRAIGHT
+        n_pts = in_arch_h ? 2 * n_base : n_base
+        xi_interior = resample_arc(
+            a.xi, b.xi,
+            n_pts,
+            on_lower ? :lower : :upper,
+            H
+        )
     end
 
     # Order the interior points along the C-path direction:
@@ -791,14 +928,54 @@ function spline_between(sts::Vector{Station}, si::Int, sj::Int,
         sort!(xi_interior)
     end
 
+    # --- LE densification: add cubic-interpolated knots near ξ=0 ---
+    # The first M3J segment (ξ=0 to ξ₁=0.001313) is large relative to the
+    # nose curvature.  Adding denser knots via cubic Lagrange interpolation
+    # through the first 4 real M3J data points steepens the Catmull-Rom
+    # tangent at the LE vertex, shrinking the nose kink angle.
+    le_touch = (a.side == :le) ? 1 : (b.side == :le) ? 2 : 0
+    if le_touch > 0
+        xd = XI_DATA[1:4]
+        yd = ETA_DATA[1:4]
+        # Add 3 knots in the first M3J segment via cubic Lagrange
+        for frac in [0.03, 0.1, 0.3, 0.6]
+            xi_sub = xd[1] + frac * (xd[2] - xd[1])
+            # Skip if already covered by an existing interior point
+            if xi_lo < xi_sub < xi_hi && !any(abs(xi_sub - x) < 1e-10 for x in xi_interior)
+                eta_sub = 0.0
+                for i in 1:4
+                    basis = 1.0
+                    for j in 1:4
+                        j != i && (basis *= (xi_sub - xd[j]) / (xd[i] - xd[j]))
+                    end
+                    eta_sub += yd[i] * basis
+                end
+                push!(xi_interior, xi_sub)
+            end
+        end
+        # Re-sort after adding densified knots
+        if !on_lower
+            sort!(xi_interior, rev=true)
+        else
+            sort!(xi_interior)
+        end
+    end
+
+    # Use cubic surface evaluation only for LE-touching blocks where the
+    # nose curvature is highest.  At xi=0 the cubic=linear (data point),
+    # so the mismatch is only at the other vertex (~0.06mm at xi≈0.01).
+    # Always use LINEAR normals — cubic normals oscillate too much
+    # (up to ±5° / 24mm at H=250) due to Lagrange stencil shifts.
+    in_arch = max(a.xi, b.xi) <= XI_ARCH
+
     pts = NTuple{3,Float64}[]
     for xi in xi_interior
         if on_lower
-            px, py = lower_pt(xi)
             nx, ny = surface_normal(max(xi, 1e-6), :lower)
+            px, py = in_arch ? lower_pt_cubic(xi) : lower_pt(xi)
         else
-            px, py = upper_pt(xi)
             nx, ny = surface_normal(max(xi, 1e-6), :upper)
+            px, py = in_arch ? upper_pt_cubic(xi) : upper_pt(xi)
         end
         push!(pts, (px + H * nx, py + H * ny, zval))
     end
@@ -820,7 +997,11 @@ function compute_edges(sts::Vector{Station})::Vector{SplineEdge}
                 vi = z_offset + lev_offset + i
                 vj = z_offset + lev_offset + i + 1
                 pts = spline_between(sts, i+1, i+2, H, zval)   # 1-based station indices
-                push!(edges, SplineEdge(vi, vj, pts))
+                # Use polyLine for all blocks — traces knot positions exactly
+                # without Catmull-Rom overshoot at high resolution, and avoids
+                # tangent mismatches at polyLine/spline block boundaries.
+                etype = "polyLine"
+                push!(edges, SplineEdge(vi, vj, pts, etype))
             end
         end
     end
@@ -953,7 +1134,7 @@ scale 0.001;   // vertices in mm → metres
         # ---- Edges ----
         println(io, "edges\n(")
         for e in edges
-            print(io, "    spline $(e.v0) $(e.v1) (")
+            print(io, "    $(e.etype) $(e.v0) $(e.v1) (")
             for p in e.pts
                 @printf(io, " ( %14.8f %14.8f %14.8f )", p[1], p[2], p[3])
             end

@@ -106,6 +106,7 @@ functions
             #include "OFstream.H"
             #include <fstream>
             #include <cmath>
+            #include "Pstream.H"
         #};
 
         codeExecute
@@ -344,56 +345,87 @@ functions
                 cells = midCells;
             }
 
-            // ── Write output ──
-            const fileName outDir =
-                mesh.time().globalPath()/"postProcessing";
-            mkDir(outDir);
-
-            if (fmt == "binary")
+            // ── Collect local data into a flat list ──
+            List<scalar> localData(cells.size() * 7);
+            forAll(cells, i)
             {
-                const fileName fpath = outDir/"midPlane.bin";
-                std::ofstream ofs(fpath, std::ios::binary);
-
-                int32_t nCols = 7;
-                int64_t nRows = cells.size();
-                ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
-                ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
-
-                forAll(cells, i)
-                {
-                    const label ci = cells[i];
-                    double row[7] =
-                    {
-                        C[ci].x(), C[ci].y(), C[ci].z(),
-                        U[ci].x(), U[ci].y(), U[ci].z(),
-                        p[ci]
-                    };
-                    ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
-                }
-
-                Info<< "writeMidPlane: wrote " << nRows
-                    << " cells (binary) to " << fpath << endl;
+                const label ci = cells[i];
+                localData[7*i + 0] = C[ci].x();
+                localData[7*i + 1] = C[ci].y();
+                localData[7*i + 2] = C[ci].z();
+                localData[7*i + 3] = U[ci].x();
+                localData[7*i + 4] = U[ci].y();
+                localData[7*i + 5] = U[ci].z();
+                localData[7*i + 6] = p[ci];
             }
-            else
-            {
-                OFstream os(outDir/"midPlane.csv");
-                os.precision(10);
-                os << "x,y,z,u,v,w,p" << nl;
 
-                forAll(cells, i)
+            // ── Gather all processor data on master ──
+            List<List<scalar>> allData(Pstream::nProcs());
+            allData[Pstream::myProcNo()] = localData;
+            Pstream::gatherList(allData);
+
+            // ── Write output (master only) ──
+            if (Pstream::master())
+            {
+                const fileName outDir =
+                    mesh.time().globalPath()/"postProcessing";
+                mkDir(outDir);
+
+                // Count total rows
+                label totalRows = 0;
+                forAll(allData, proci)
                 {
-                    const label ci = cells[i];
-                    os  << C[ci].x() << ","
-                        << C[ci].y() << ","
-                        << C[ci].z() << ","
-                        << U[ci].x() << ","
-                        << U[ci].y() << ","
-                        << U[ci].z() << ","
-                        << p[ci] << nl;
+                    totalRows += allData[proci].size() / 7;
                 }
 
-                Info<< "writeMidPlane: wrote " << cells.size()
-                    << " cells (csv) to " << os.name() << endl;
+                if (fmt == "binary")
+                {
+                    const fileName fpath = outDir/"midPlane.bin";
+                    std::ofstream ofs(fpath, std::ios::binary);
+
+                    int32_t nCols = 7;
+                    int64_t nRows = totalRows;
+                    ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
+                    ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
+
+                    forAll(allData, proci)
+                    {
+                        const List<scalar>& pd = allData[proci];
+                        for (label i = 0; i < pd.size(); i += 7)
+                        {
+                            double row[7];
+                            for (int j = 0; j < 7; ++j) row[j] = pd[i+j];
+                            ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << nRows
+                        << " cells (binary) to " << fpath << endl;
+                }
+                else
+                {
+                    OFstream os(outDir/"midPlane.csv");
+                    os.precision(10);
+                    os << "x,y,z,u,v,w,p" << nl;
+
+                    forAll(allData, proci)
+                    {
+                        const List<scalar>& pd = allData[proci];
+                        for (label i = 0; i < pd.size(); i += 7)
+                        {
+                            os  << pd[i]   << ","
+                                << pd[i+1] << ","
+                                << pd[i+2] << ","
+                                << pd[i+3] << ","
+                                << pd[i+4] << ","
+                                << pd[i+5] << ","
+                                << pd[i+6] << nl;
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << totalRows
+                        << " cells (csv) to " << os.name() << endl;
+                }
             }
         #};
     }

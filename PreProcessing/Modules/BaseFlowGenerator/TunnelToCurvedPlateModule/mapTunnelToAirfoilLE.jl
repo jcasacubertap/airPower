@@ -281,17 +281,19 @@ function parse_sampled_xy(filepath::String)
     lines = filter(!isempty, strip.(readlines(filepath)))
     n = length(lines)
 
-    p_values = Vector{Float64}(undef, n)
-    U_values = Vector{NTuple{3,Float64}}(undef, n)
+    sampled_xy = Vector{NTuple{2,Float64}}(undef, n)
+    p_values   = Vector{Float64}(undef, n)
+    U_values   = Vector{NTuple{3,Float64}}(undef, n)
 
     for (i, line) in enumerate(lines)
         cols = split(line)
-        p_values[i] = parse(Float64, cols[4])
-        U_values[i] = (parse(Float64, cols[5]),
-                       parse(Float64, cols[6]),
-                       parse(Float64, cols[7]))
+        sampled_xy[i] = (parse(Float64, cols[1]), parse(Float64, cols[2]))
+        p_values[i]   = parse(Float64, cols[4])
+        U_values[i]   = (parse(Float64, cols[5]),
+                         parse(Float64, cols[6]),
+                         parse(Float64, cols[7]))
     end
-    return p_values, U_values
+    return sampled_xy, p_values, U_values
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -491,11 +493,69 @@ function main()
         # Combined file: <setName>_p_U.xy  (columns: x y z p Ux Uy Uz)
         xy_file = joinpath(pp_dir, "$(set_name)_p_U.xy")
         println("  Parsing $xy_file...")
-        p_values, U_values = parse_sampled_xy(xy_file)
+        sampled_xy, p_values, U_values = parse_sampled_xy(xy_file)
 
-        @assert length(p_values) == length(centers) (
-            "Mismatch: $(length(p_values)) sampled values vs " *
-            "$(length(centers)) face centres for $patch_name")
+        n_sampled = length(p_values)
+        n_centers = length(centers)
+
+        if n_sampled != n_centers
+            n_miss = n_centers - n_sampled
+            println()
+            println("  ┌─────────────────────────────────────────────────────────────┐")
+            println("  │  WARNING: $n_miss of $n_centers face centres for $patch_name")
+            println("  │  fell outside the TunnelCase domain and were not sampled.   │")
+            println("  └─────────────────────────────────────────────────────────────┘")
+            println()
+            println("  Options:")
+            println("    [f] Fill missing points with nearest sampled value")
+            println("    [s] Skip this patch (do not write boundaryData)")
+            println("    [a] Abort")
+            print("  Choose [f/s/a]: ")
+            choice = lowercase(strip(readline()))
+
+            if choice == "a"
+                error("Aborted by user.")
+            elseif choice == "s"
+                println("  Skipping $patch_name.")
+                continue
+            elseif choice == "f"
+                # Match sampled points to face centres, fill gaps
+                p_full = Vector{Float64}(undef, n_centers)
+                U_full = Vector{NTuple{3,Float64}}(undef, n_centers)
+                matched = falses(n_centers)
+
+                for j in 1:n_sampled
+                    best_i, best_d = 0, Inf
+                    for i in 1:n_centers
+                        matched[i] && continue
+                        d = (centers[i][1] - sampled_xy[j][1])^2 +
+                            (centers[i][2] - sampled_xy[j][2])^2
+                        if d < best_d; best_d = d; best_i = i; end
+                    end
+                    matched[best_i] = true
+                    p_full[best_i] = p_values[j]
+                    U_full[best_i] = U_values[j]
+                end
+
+                for i in 1:n_centers
+                    matched[i] && continue
+                    best_j, best_d = 1, Inf
+                    for j in 1:n_sampled
+                        d = (sampled_xy[j][1] - centers[i][1])^2 +
+                            (sampled_xy[j][2] - centers[i][2])^2
+                        if d < best_d; best_d = d; best_j = j; end
+                    end
+                    p_full[i] = p_values[best_j]
+                    U_full[i] = U_values[best_j]
+                end
+
+                p_values = p_full
+                U_values = U_full
+                println("  Filled $n_miss missing points with nearest sampled values.")
+            else
+                error("Invalid choice: '$choice'. Aborting.")
+            end
+        end
 
         for field in fields
             if field == "U"
