@@ -47,13 +47,20 @@ runTimeModifiable true;
 
 functions
 {
-    // 
+    solverInfo
+    {
+        type            solverInfo;
+        libs            ("libutilityFunctionObjects.so");
+        writeResidualFields no;
+        fields          ("U" "p");
+    }
+
     yPlus
     {
-    type                 yPlus;
-    libs                 ("libfieldFunctionObjects.so");
-    executeControl       writeTime;
-    writeControl         writeTime;
+        type                 yPlus;
+        libs                 ("libfieldFunctionObjects.so");
+        executeControl       writeTime;
+        writeControl         writeTime;
     }
 
     writeMidPlane

@@ -34,25 +34,13 @@ boundaryField
     {
         type            zeroGradient;
     }
-    front_half0
+    front
     {
         type            cyclic;
-        neighbourPatch  back_half0;
     }
-    back_half0
+    back
     {
         type            cyclic;
-        neighbourPatch  front_half0;
-    }
-    front_half1
-    {
-        type            cyclic;
-        neighbourPatch  back_half1;
-    }
-    back_half1
-    {
-        type            cyclic;
-        neighbourPatch  front_half1;
     }
     outlet
     {

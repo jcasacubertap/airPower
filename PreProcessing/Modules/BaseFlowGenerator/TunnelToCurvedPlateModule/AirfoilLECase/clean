@@ -7,3 +7,4 @@ cleanTimeDirectories
 rm -rf processor*
 rm -rf postProcessing
 rm -rf constant/polyMesh
+rm -rf dynamicCode

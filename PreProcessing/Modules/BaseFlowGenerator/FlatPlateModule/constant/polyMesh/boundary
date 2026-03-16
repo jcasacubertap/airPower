@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  2312                                  |
+|  \\    /   O peration     | Version:  2412                                  |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
@@ -16,8 +16,7 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-
-8
+6
 (
     top
     {
@@ -25,64 +24,45 @@ FoamFile
         nFaces          308;
         startFace       30412;
     }
-
     inlet
     {
         type            patch;
-        inGroups        1 ( patch );
         nFaces          80;
         startFace       30720;
     }
-
     outlet
     {
         type            patch;
-        inGroups        1 ( patch );
         nFaces          80;
         startFace       30800;
     }
-
     plate
     {
         type            wall;
-        inGroups        1 ( wall );
+        inGroups        1(wall);
         nFaces          308;
         startFace       30880;
     }
-
-    front_half0
+    front
     {
         type            cyclic;
-        nFaces          3080;
+        inGroups        1(cyclic);
+        nFaces          6160;
         startFace       31188;
-        neighbourPatch  back_half0;
+        matchTolerance  0.0001;
+        transform       unknown;
+        neighbourPatch  back;
     }
-
-    front_half1
+    back
     {
         type            cyclic;
-        nFaces          3080;
-        startFace       34268;
-        neighbourPatch  back_half1;
-    }
-
-    back_half0
-    {
-        type            cyclic;
-        nFaces          3080;
+        inGroups        1(cyclic);
+        nFaces          6160;
         startFace       37348;
-        neighbourPatch  front_half0;
+        matchTolerance  0.0001;
+        transform       unknown;
+        neighbourPatch  front;
     }
-
-    back_half1
-    {
-        type            cyclic;
-        nFaces          3080;
-        startFace       40428;
-        neighbourPatch  front_half1;
-    }
-
 )
-
 
 // ************************************************************************* //
