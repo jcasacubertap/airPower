@@ -7,4 +7,4 @@ cleanTimeDirectories
 rm -rf processor*
 rm -rf postProcessing
 rm -rf dynamicCode
-
+rm -f constant/inputParam
