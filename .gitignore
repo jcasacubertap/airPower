@@ -1,6 +1,12 @@
 # macOS Finder metadata
 .DS_Store
 
+# Editor backup files
+*~
+
+# Converged simulation data (large, not tracked)
+*_data/
+
 # OpenFOAM runtime data
 **/processor[0-9]*/
 **/dynamicCode/
