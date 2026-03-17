@@ -5,8 +5,7 @@ Two-step pipeline: wind-tunnel simulation (TunnelCase), then mapped
 curved-plate simulation (AirfoilLECase).
 """
 function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
-    base = joinpath(root, "PreProcessing", "Modules", "BaseFlowGenerator")
-    tunnel_to_curved = joinpath(base, "TunnelToCurvedPlateModule")
+    tunnel_to_curved = joinpath(root, "PreProcessing", "Modules", "TunnelToCurvedPlateModule")
 
     tunnel_case   = joinpath(tunnel_to_curved, "TunnelCase")
     airfoil_case  = joinpath(tunnel_to_curved, "AirfoilLECase")
@@ -20,6 +19,9 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :mesh => () -> begin
+            write_tunnel_input_param(tunnel_case)
+            write_airfoil_le_input_param(airfoil_case)
+
             @info "Meshing TunnelCase..."
             foam_exec(backend, tunnel_case, "blockMesh")
             @info "Generating AirfoilLECase grid..."
@@ -29,6 +31,9 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :solve => () -> begin
+            write_tunnel_input_param(tunnel_case)
+            write_airfoil_le_input_param(airfoil_case)
+
             @info "Solving TunnelCase..."
             foam_script(backend, tunnel_case, "run")
             @info "Mapping tunnel → airfoil..."
@@ -44,7 +49,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
         :viz => () -> begin
             plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
-                                       "BaseFlowGenerator", "TunnelToCurvedPlate")
+                                       "TunnelToCurvedPlate")
 
             # Residuals for both cases
             res_tunnel  = plot_residuals(tunnel_case;  savedir=plotting_dir, label="TunnelCase")

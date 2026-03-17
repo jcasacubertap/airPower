@@ -1,7 +1,0 @@
-#!/bin/sh
-
-NP=${1:-8}
-
-decomposePar
-mpirun -np "$NP" --oversubscribe simpleFoam -parallel
-reconstructPar
