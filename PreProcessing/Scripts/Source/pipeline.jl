@@ -28,13 +28,15 @@ function run_module(name::AbstractString, action_str::AbstractString="all";
         [Symbol(action_str)]
     end
 
+    result = nothing
     for action in actions
         if !haskey(mod, action)
             @warn "Module '$name' does not support action :$action — skipping"
             continue
         end
         @info "=== $name : $action ==="
-        mod[action]()
+        result = mod[action]()
     end
     @info "Done."
+    return result
 end

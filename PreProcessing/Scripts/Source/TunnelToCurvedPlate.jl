@@ -43,17 +43,21 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :viz => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting")
+            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
+                                       "BaseFlowGenerator", "TunnelToCurvedPlate")
 
             # Residuals for both cases
-            plot_residuals(tunnel_case;  savedir=plotting_dir, label="TunnelCase")
-            plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECase")
+            res_tunnel  = plot_residuals(tunnel_case;  savedir=plotting_dir, label="TunnelCase")
+            res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECase")
 
             # Field contours from AirfoilLECase midPlane
-            plot_fields(airfoil_case; savedir=plotting_dir)
+            fields = plot_fields(airfoil_case; savedir=plotting_dir)
 
             # BL profiles
-            plot_profiles(airfoil_case; savedir=plotting_dir)
+            bl = plot_profiles(airfoil_case; savedir=plotting_dir)
+
+            return (res_tunnel=res_tunnel, res_airfoil=res_airfoil,
+                    fields=fields, bl=bl)
         end,
     )
 end

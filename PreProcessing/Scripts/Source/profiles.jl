@@ -1,4 +1,4 @@
-using DelimitedFiles, Printf
+using DelimitedFiles, Printf, LaTeXStrings
 
 # M3J airfoil data (ξ = x/c, η = y/c, LE → TE), 65 points on suction side.
 # Copied from generateGrid.jl.
@@ -39,7 +39,6 @@ const ETA_DATA = Float64[
 
 Interpolate the suction-side surface point and outward normal at chord fraction `xi_c`.
 Returns physical coordinates [m] and unit outward normal.
-Reads chord, alpha, center from AirfoilLECase/system/inputDomain.
 """
 function airfoil_surface(xi_c::Float64;
                          chord_mm::Float64=900.0,
@@ -49,9 +48,7 @@ function airfoil_surface(xi_c::Float64;
     chord_m = chord_mm * 1e-3
     alpha   = alpha_deg * π / 180.0
 
-    # Linear interpolation in M3J data
     n = length(XI_DATA)
-    # Find bracketing interval
     idx = searchsortedlast(XI_DATA, xi_c)
     idx = clamp(idx, 1, n - 1)
     t = (xi_c - XI_DATA[idx]) / (XI_DATA[idx+1] - XI_DATA[idx])
@@ -59,7 +56,6 @@ function airfoil_surface(xi_c::Float64;
     xi_local  = (1 - t) * XI_DATA[idx]  + t * XI_DATA[idx+1]
     eta_local = (1 - t) * ETA_DATA[idx] + t * ETA_DATA[idx+1]
 
-    # Body-frame → physical: x_body = (ξ - 0.5)*chord, y_body = η*chord, then rotate by alpha
     xb = (xi_local - 0.5) * chord_m
     yb = eta_local * chord_m
     ca, sa = cos(alpha), sin(alpha)
@@ -83,7 +79,6 @@ function airfoil_surface(xi_c::Float64;
     end
     dx = (xi_next - xi_prev) * chord_m
     dy = (eta_next - eta_prev) * chord_m
-    # Rotate tangent
     tx = ca * dx - sa * dy
     ty = sa * dx + ca * dy
     tmag = sqrt(tx^2 + ty^2)
@@ -102,8 +97,6 @@ end
                   chord_mm, alpha_deg, x_center_mm, y_center_mm)
 
 Extract wall-normal BL profiles from midPlane.csv at specified ξ/c stations.
-`stations` are fractional chord positions (0 = LE, 1 = TE).
-`delta` is the max wall-normal distance to include [m].
 """
 function plot_profiles(case_path::AbstractString;
                        savedir::AbstractString=case_path,
@@ -130,21 +123,39 @@ function plot_profiles(case_path::AbstractString;
     w_all = Float64.(raw[:, 6])
     Umag_all = @. sqrt(u_all^2 + v_all^2 + w_all^2)
 
-    # Freestream velocity estimate (99th percentile to avoid outliers)
+    # Freestream velocity estimate (99th percentile)
     sorted_U = sort(Umag_all)
     U_inf = sorted_U[round(Int, 0.99 * length(sorted_U))]
 
-    p = plot(; xlabel="U / U∞", ylabel="Wall distance [m]",
-             title="BL profiles — $(basename(case_path))",
-             size=(800, 600), legend=:topright, grid=true)
+    colors = [:royalblue, :firebrick, :forestgreen, :darkorange, :purple, :teal]
+
+    p = plot(;
+        xlabel  = L"U / U_\infty",
+        ylabel  = L"\mathrm{Wall \ distance \ [m]}",
+        ylims   = (0.0, delta),
+        size    = (680, 500),
+        legend  = :outertopright,
+        framestyle     = :box,
+        grid           = true,
+        gridalpha      = 0.3,
+        gridlinewidth  = 0.5,
+        tickfontsize   = 10,
+        guidefontsize  = 12,
+        legendfontsize = 9,
+        titlefontsize  = 13,
+        left_margin    = 8Plots.mm,
+        bottom_margin  = 6Plots.mm,
+        right_margin   = 4Plots.mm,
+        top_margin     = 4Plots.mm,
+        dpi = 200,
+    )
 
     found_any = false
-    for xi_c in stations
+    for (k, xi_c) in enumerate(stations)
         x_s, y_s, nx, ny = airfoil_surface(xi_c;
             chord_mm=chord_mm, alpha_deg=alpha_deg,
             x_center_mm=x_center_mm, y_center_mm=y_center_mm)
 
-        # Collect all cells in the strip (allow large normal range to handle LE interpolation offset)
         raw_dn  = Float64[]
         raw_u   = Float64[]
 
@@ -160,7 +171,7 @@ function plot_profiles(case_path::AbstractString;
         end
 
         if isempty(raw_dn)
-            @warn "No cells found for station ξ/c = $xi_c (surface at x=$(round(x_s,digits=4)), y=$(round(y_s,digits=4)))"
+            @warn "No cells found for station xi/c = $xi_c (surface at x=$(round(x_s,digits=4)), y=$(round(y_s,digits=4)))"
             continue
         end
 
@@ -170,8 +181,15 @@ function plot_profiles(case_path::AbstractString;
 
         found_any = true
         perm = sortperm(wall_dist)
+        c = colors[mod1(k, length(colors))]
         plot!(p, raw_u[perm], wall_dist[perm];
-              label=@sprintf("ξ/c = %.2f", xi_c), linewidth=1.5, marker=:circle, markersize=2)
+              label      = latexstring("\\xi/c = $(@sprintf("%.2f", xi_c))"),
+              color      = c,
+              linewidth  = 2,
+              marker     = :circle,
+              markersize = 3,
+              markercolor = c,
+              markerstrokewidth = 0)
     end
 
     if !found_any
@@ -181,7 +199,7 @@ function plot_profiles(case_path::AbstractString;
 
     mkpath(savedir)
     label = basename(case_path)
-    outfile = joinpath(savedir, "BLprofiles_$(label).png")
+    outfile = joinpath(savedir, "blProfiles$(label).png")
     savefig(p, outfile)
     @info "Saved: $outfile"
     return p

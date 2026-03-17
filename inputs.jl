@@ -2,9 +2,12 @@
 # airPower — central inputs
 #
 # All major simulation parameters are defined here.
-# For now, only FlatPlateModule boundary/flow parameters.
 # blockMeshDict-related inputs are kept in blockMeshDict.
 #
+
+# ==========================================================================
+# DirectFlatPlate
+# ==========================================================================
 
 # --- Inflow parameters ---
 const Uinf   = 12.417664315415696    # chordwise velocity [m/s]
@@ -23,3 +26,9 @@ const freeStreamViscosity = 1.456610719354608e-5   # [m^2/s]
 
 # --- Output settings ---
 const outputFormat = "csv"   # csv | binary
+
+# ==========================================================================
+# TunnelToCurvedPlate
+# ==========================================================================
+
+# (to be added)

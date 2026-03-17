@@ -5,7 +5,7 @@ Direct flat-plate base-flow computation (single OpenFOAM case).
 """
 function make_direct_flat_plate(backend::BackendType, root::AbstractString)
     case_dir = joinpath(root, "PreProcessing", "Modules", "BaseFlowGenerator",
-                        "FlatPlateModule")
+                        "DirectFlatPlateModule")
 
     return Dict{Symbol, Function}(
         :clean => () -> foam_script(backend, case_dir, "clean"),
@@ -24,9 +24,12 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
         end,
 
         :viz => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting")
-            plot_residuals(case_dir; savedir=plotting_dir, label="DirectFlatPlate")
-            plot_fields(case_dir; savedir=plotting_dir)
+            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
+                                       "BaseFlowGenerator", "DirectFlatPlate")
+            res    = plot_residuals(case_dir; savedir=plotting_dir, label="DirectFlatPlate")
+            fields = plot_fields(case_dir; savedir=plotting_dir)
+
+            return (residuals=res, fields=fields)
         end,
     )
 end

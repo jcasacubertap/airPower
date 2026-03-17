@@ -17,7 +17,8 @@ include(joinpath(ROOT, "inputs.jl"))
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "backend.jl"))
 
 # Plotting (must come before modules that reference plot functions)
-using Plots, DelimitedFiles, Glob, Printf
+using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings
+default(fontfamily = "Computer Modern")
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "residuals.jl"))
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "fields.jl"))
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "profiles.jl"))
@@ -28,8 +29,14 @@ include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "TunnelToCurvedPlat
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "DirectFlatPlate.jl"))
 
 # --- Main ---
-module_name = length(ARGS) >= 1 ? ARGS[1] : "TunnelToCurvedPlate"
-action      = length(ARGS) >= 2 ? ARGS[2] : "all"
+# Only run automatically when called from the command line (julia run.jl ...),
+# not when loaded interactively via include("run.jl") in the REPL.
+if !isempty(ARGS)
+    module_name = ARGS[1]
+    action      = length(ARGS) >= 2 ? ARGS[2] : "all"
 
-@info "airPower orchestrator" mod=module_name action=action
-run_module(module_name, action; root=ROOT)
+    @info "airPower orchestrator" mod=module_name action=action
+    run_module(module_name, action; root=ROOT)
+else
+    @info "airPower loaded. Usage: run_module(\"TunnelToCurvedPlate\", \"viz\"; root=ROOT)"
+end
