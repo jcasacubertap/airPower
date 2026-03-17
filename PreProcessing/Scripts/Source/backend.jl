@@ -56,13 +56,15 @@ end
 
 Run an existing shell script (e.g. `run`, `clean`, `runPostProcess`) inside the case.
 """
-function foam_script(backend::BackendType, case_path::AbstractString, script::AbstractString; verbose::Bool=true)
+function foam_script(backend::BackendType, case_path::AbstractString, script::AbstractString,
+                     args::AbstractString=""; verbose::Bool=true)
     script_path = joinpath(case_path, script)
     if !isfile(script_path)
         @warn "Script not found: $script_path"
         return false
     end
-    foam_exec(backend, case_path, "bash $script"; verbose)
+    cmd = isempty(args) ? "bash $script" : "bash $script $args"
+    foam_exec(backend, case_path, cmd; verbose)
 end
 
 """
@@ -72,6 +74,7 @@ Generate `constant/inputParam` for the FlatPlateModule from the central
 Julia inputs.  The file is auto-generated and should not be edited by hand.
 """
 function write_flat_plate_input_param(case_dir::AbstractString)
+    p = inp.DirectFlatPlate
     path = joinpath(case_dir, "constant", "inputParam")
     mkpath(dirname(path))
     open(path, "w") do io
@@ -96,22 +99,22 @@ FoamFile
 Upinlet
 {
 //Inflow parameters
- Uinf        $Uinf;
- Winf        $Winf;
- xInlet      $xInlet;
+ Uinf        $(p.Uinf);
+ Winf        $(p.Winf);
+ xInlet      $(p.xInlet);
 
 //Top-boundary parameters (coefficient of polinomyal, Casacuberta et al, 2022)
- pa4         $pa4;
- pa3         $pa3;
- pa2         $pa2;
- pa1         $pa1;
- pa0         $pa0;
+ pa4         $(p.pa4);
+ pa3         $(p.pa3);
+ pa2         $(p.pa2);
+ pa1         $(p.pa1);
+ pa0         $(p.pa0);
 
 //Fluid properties
- freeStreamViscosity   $freeStreamViscosity;
+ freeStreamViscosity   $(p.freeStreamViscosity);
 
 //Output settings
- outputFormat          $outputFormat;
+ outputFormat          $(p.outputFormat);
 }
 
 // ************************************************************************* //""")

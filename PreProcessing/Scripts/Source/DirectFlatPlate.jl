@@ -15,12 +15,12 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
         end,
         :solve => () -> begin
             write_flat_plate_input_param(case_dir)
-            foam_script(backend, case_dir, "run")
+            foam_script(backend, case_dir, "run", "$(inp.DirectFlatPlate.nProcs)")
         end,
 
         :post => () -> begin
-            @info "Post-processing midPlane (serial)..."
-            foam_exec(backend, case_dir, "simpleFoam -postProcess -latestTime")
+            @info "Post-processing DirectFlatPlate..."
+            foam_script(backend, case_dir, "runPostProcess", "$(inp.DirectFlatPlate.nProcs)")
         end,
 
         :viz => () -> begin
