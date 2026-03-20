@@ -28,45 +28,7 @@
 using Printf
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SECTION 1 — M3J AIRFOIL DATA  (ξ = x/c,  η = y/c,  LE → TE)
-# ═══════════════════════════════════════════════════════════════════════
-# 65 points on the suction (upper) side.
-# Lower side is the symmetric mirror: η_lower(ξ) = −η_upper(ξ).
-
-const XI_DATA = Float64[
-    0.0,      0.001313, 0.003646, 0.007137, 0.011779,
-    0.017562, 0.024472, 0.032492, 0.041604, 0.051787,
-    0.063016, 0.075266, 0.088508, 0.10271,  0.11784,
-    0.13387,  0.15074,  0.16844,  0.18691,  0.20611,
-    0.22599,  0.24652,  0.26764,  0.2893,   0.31145,
-    0.33405,  0.35703,  0.38034,  0.40394,  0.42776,
-    0.45174,  0.47584,  0.5,      0.52416,  0.54826,
-    0.57224,  0.59606,  0.61966,  0.64297,  0.66595,
-    0.68855,  0.7107,   0.73236,  0.75348,  0.77401,
-    0.79389,  0.81309,  0.83156,  0.84926,  0.86613,
-    0.88216,  0.89729,  0.91149,  0.92473,  0.93698,
-    0.94821,  0.9584,   0.96751,  0.97553,  0.98244,
-    0.98822,  0.99286,  0.99635,  0.99869,  1.0
-]
-
-const ETA_DATA = Float64[
-    0.0,      0.005524, 0.009305, 0.013007, 0.016561,
-    0.019935, 0.023174, 0.026436, 0.029709, 0.033033,
-    0.036384, 0.039752, 0.043132, 0.046513, 0.049875,
-    0.053194, 0.056452, 0.059635, 0.062735, 0.065716,
-    0.068591, 0.071357, 0.073995, 0.076469, 0.078799,
-    0.080952, 0.082919, 0.084694, 0.086235, 0.087554,
-    0.088594, 0.089378, 0.089851, 0.09002,  0.089814,
-    0.08923,  0.088209, 0.086598, 0.084245, 0.080977,
-    0.077081, 0.07263,  0.067808, 0.062635, 0.057286,
-    0.051831, 0.046364, 0.040993, 0.035807, 0.03088,
-    0.026254, 0.021944, 0.017969, 0.014393, 0.011285,
-    0.00868,  0.006551, 0.004917, 0.003622, 0.002599,
-    0.001744, 0.001056, 0.00054,  0.000194, 0.0
-]
-
-# ═══════════════════════════════════════════════════════════════════════
-#  SECTION 2 — READ USER PARAMETERS FROM inputs.jl
+#  INPUTS — load inputs.jl (single source of truth)
 # ═══════════════════════════════════════════════════════════════════════
 
 """Walk up from `start` until a file named `name` is found."""
@@ -82,6 +44,59 @@ function find_ancestor_file(start::String, name::String)
 end
 
 include(find_ancestor_file(@__DIR__, "inputs.jl"))
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SECTION 1 — AIRFOIL DATA  (ξ = x/c,  η = y/c,  LE → TE)
+# ═══════════════════════════════════════════════════════════════════════
+# Read from .dat file (TE upper → LE → TE lower), extract upper surface,
+# sort LE → TE.  Lower side is the mirror: η_lower(ξ) = −η_upper(ξ).
+
+"""
+    load_airfoil_upper(filepath) → (xi, eta)
+
+Read an airfoil .dat file (tab/space-separated x/c, y/c columns, full
+contour TE→LE→TE) and return the upper-surface points sorted LE→TE.
+"""
+function load_airfoil_upper(filepath::String)
+    xi_all = Float64[]
+    eta_all = Float64[]
+    for line in eachline(filepath)
+        line = strip(line)
+        isempty(line) && continue
+        parts = split(line)
+        length(parts) >= 2 || continue
+        x = tryparse(Float64, parts[1])
+        y = tryparse(Float64, parts[2])
+        (x === nothing || y === nothing) && continue
+        push!(xi_all, x)
+        push!(eta_all, y)
+    end
+
+    # Extract upper surface (eta ≥ 0), deduplicate TE (xi=1, eta=0)
+    mask = eta_all .>= 0.0
+    xi_up  = xi_all[mask]
+    eta_up = eta_all[mask]
+
+    # Sort by xi ascending (LE → TE)
+    perm = sortperm(xi_up)
+    xi_up  = xi_up[perm]
+    eta_up = eta_up[perm]
+
+    # Remove duplicate points (e.g. two (0,0) or two (1,0))
+    keep = [true; [!(xi_up[i] == xi_up[i-1] && eta_up[i] == eta_up[i-1]) for i in 2:length(xi_up)]]
+    return xi_up[keep], eta_up[keep]
+end
+
+# Resolve .dat path from inputs
+const _AIRFOIL_DAT = let
+    dir = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
+    joinpath(dir, "PreProcessing", "InputOutput", "AirfoilData", inp.TTCP.tunnel.airfoilFile)
+end
+const XI_DATA, ETA_DATA = load_airfoil_upper(_AIRFOIL_DAT)
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SECTION 2 — LOAD USER PARAMETERS INTO GLOBALS
+# ═══════════════════════════════════════════════════════════════════════
 
 function load_params()
     t = inp.TTCP.tunnel

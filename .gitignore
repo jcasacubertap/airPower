@@ -13,6 +13,7 @@
 **/postProcessing/
 **/constant/polyMesh/
 **/constant/extendedFeatureEdgeMesh/
+**/constant/triSurface/
 
 # OpenFOAM solution time directories (but keep 0/ for initial conditions)
 **/[1-9]*/

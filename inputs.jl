@@ -3,7 +3,6 @@
 #
 # All major simulation parameters are defined here.
 # Access: inp.<CaseName>.<variable>
-# blockMeshDict-related inputs are kept in blockMeshDict.
 #
 
 const inp = (
@@ -57,17 +56,18 @@ const inp = (
             tunnelLength           = 7.800,   # [m]
 
             # Airfoil geometry
-            chord    = 0.900,    # [m]
-            alphaDeg = -3.0,     # [deg]
-            xCenter  = 0.0,      # [m]
-            yCenter  = 0.0,      # [m]
+            airfoilFile = "M3J.dat",  # file in InputOutput/AirfoilData/
+            chord       = 0.900,    # [m]
+            alphaDeg    = -3.0,     # [deg]
+            xCenter     = 0.0,      # [m]
+            yCenter     = 0.0,      # [m]
 
             # Grid resolution
             Nx = 210,
             Ny = 60,
 
             # Turbulence
-            turbulenceIntensity = 0.0003, # [-] (I = turbulenceIntensity * 100 [%])
+            turbulenceIntensity = 0.0003, # [-] (turbulenceIntensity = 0.0003 -> I = 0.03 %)
             turbLengthScale     = 0.009,  # [m]
 
             # BSpline control points (upper-wall curvature, symmetry applied)

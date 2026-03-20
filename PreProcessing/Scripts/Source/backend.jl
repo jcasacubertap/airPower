@@ -260,6 +260,39 @@ Upinlet
 end
 
 """
+    load_airfoil_upper(filepath) → (xi, eta)
+
+Read an airfoil .dat file (tab/space-separated x/c, y/c columns, full
+contour TE→LE→TE) and return the upper-surface points sorted LE→TE.
+"""
+function load_airfoil_upper(filepath::AbstractString)
+    xi_all = Float64[]
+    eta_all = Float64[]
+    for line in eachline(filepath)
+        line = strip(line)
+        isempty(line) && continue
+        parts = split(line)
+        length(parts) >= 2 || continue
+        x = tryparse(Float64, parts[1])
+        y = tryparse(Float64, parts[2])
+        (x === nothing || y === nothing) && continue
+        push!(xi_all, x)
+        push!(eta_all, y)
+    end
+
+    mask = eta_all .>= 0.0
+    xi_up  = xi_all[mask]
+    eta_up = eta_all[mask]
+
+    perm = sortperm(xi_up)
+    xi_up  = xi_up[perm]
+    eta_up = eta_up[perm]
+
+    keep = [true; [!(xi_up[i] == xi_up[i-1] && eta_up[i] == eta_up[i-1]) for i in 2:length(xi_up)]]
+    return xi_up[keep], eta_up[keep]
+end
+
+"""
     run_julia_subprocess(script_path; dir, args) → Bool
 
 Run a Julia script as a subprocess (isolated from our module scope).

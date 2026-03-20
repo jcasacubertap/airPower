@@ -1,4 +1,4 @@
-const ALL_ACTIONS = [:clean, :mesh, :solve, :post, :viz]
+const ALL_ACTIONS = [:clean, :prep, :mesh, :solve, :post, :viz]
 
 # Registry populated after module files are included
 const MODULE_REGISTRY = Dict{String, Function}()

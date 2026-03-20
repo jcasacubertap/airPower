@@ -16,9 +16,8 @@ FoamFile
 
 // Which of the steps to run
 castellatedMesh true;
-snap            true;
+snap            false;
 addLayers       false;
-
 
 // Geometry. Definition of all surfaces. All surfaces are of class
 // searchableSurface.
