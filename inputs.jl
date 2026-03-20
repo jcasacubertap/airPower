@@ -12,6 +12,10 @@ const inp = (
     # DFP — DirectFlatPlateModule
     # ======================================================================
     DFP = (
+        # Domain geometry 
+        domainLength = 0.650, # [m]
+        domainHeight = 0.020, # [m]
+
         # Inflow parameters
         Uinf   = 12.417664315415696,    # chordwise velocity [m/s]
         Winf   = 20.3,                  # spanwise velocity [m/s]
@@ -42,79 +46,72 @@ const inp = (
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
             freeStreamVelocity  = 24.84840467482210,        # [m/s]
-            freeStreamViscosity = 1.456610719354608e-5,      # [m^2/s]
-            chord    = 900,      # [mm]
-            alphaDeg = -3.0,     # [deg]
-            xCenter  = 0.0,      # [mm]
-            yCenter  = 0.0,      # [mm]
+            freeStreamViscosity = 1.456610719354608e-5,     # [m^2/s]
         ),
 
         # ── TunnelCase-specific ─────────────────────────────────────────
         tunnel = (
             # Geometry
-            tunnelInletHeight  = 900.0,   # [mm] (tunnel half height)
-            tunnelOutletHeight = 900.0,   # [mm]
-            flatPlateLength    = 7800,    # [mm]
-            z0 = -10,                     # [mm]
-            z1 =  10,                     # [mm]
-            seleAR            = 4,        # [-]
-            seleHalfThickness = 10,       # [mm]
-            lamTurbHeight     = 40,       # [mm]
+            tunnelInletHalfHeight  = 0.900,   # [m] (tunnel inlet half height, symmetry applied)
+            tunnelOutletHalfHeight = 0.900,   # [m] (tunnel outlet half height, symmetry applied)
+            tunnelLength           = 7.800,   # [m]
+
+            # Airfoil geometry
+            chord    = 0.900,    # [m]
+            alphaDeg = -3.0,     # [deg]
+            xCenter  = 0.0,      # [m]
+            yCenter  = 0.0,      # [m]
 
             # Grid resolution
             Nx = 210,
             Ny = 60,
 
             # Turbulence
-            turbulenceIntensity = 0.0003, # [-] (I = 0.03%)
+            turbulenceIntensity = 0.0003, # [-] (I = turbulenceIntensity * 100 [%])
             turbLengthScale     = 0.009,  # [m]
 
-            # BSpline control points (upper-wall curvature)
-            xcp1 = -1950, ycp1 = 900,
-            xcp2 = 0,     ycp2 = 900,
-            xcp3 = 1950,  ycp3 = 900,
+            # BSpline control points (upper-wall curvature, symmetry applied)
+            xcp1 = -1.950, ycp1 = 0.900,  # [m]
+            xcp2 = 0.0,    ycp2 = 0.900,  # [m]
+            xcp3 = 1.950,  ycp3 = 0.900,  # [m]
         ),
 
         # ── AirfoilLECase-specific ──────────────────────────────────────
         airfoilLE = (
-            # Domain extent (dimensionless x/c)
-            xiArch           = 0.02,
-            xiSuctionOutlet  = 0.50,
-            xiPressureOutlet = 0.08,
+            # Domain extent (expressed as dimensionless x/c)
+            xiArch           = 0.02,   # x/c boundary between arch (curved LE) and straight blocks
+            xiSuctionOutlet  = 0.50,   # x/c at the upper (suction-side) domain outlet
+            xiPressureOutlet = 0.08,   # x/c at the lower (pressure-side) domain outlet
 
-            # Wall-normal band heights [mm]
-            hBL  = 280,
-            hFar = 280,
-
-            # Spanwise [mm]
-            zWidth = 2,
+            # Wall-normal band heights
+            hBL  = 0.280,   # [m] height of boundary-layer block band (wall-normal)
+            hFar = 0.280,   # [m] height of far-field block band (beyond BL)
 
             # Block segmentation along C-path
-            nSegSuction  = 6,
-            nSegArchUp   = 2,
-            nSegArchLo   = 2,
-            nSegPressure = 2,
-            cosineArch   = true,
+            nSegSuction  = 6,      # blocks from suction outlet to xiArch (upper side)
+            nSegArchUp   = 2,      # blocks from xiArch to LE (upper side)
+            nSegArchLo   = 2,      # blocks from LE to xiArch (lower side)
+            nSegPressure = 2,      # blocks from xiArch to pressure outlet (lower side)
+            cosineArch   = true,   # cosine clustering of stations near the LE
 
             # Grid resolution
-            nxTotal = 800,
-            nyBL    = 600,
-            nz      = 2,
-            gradBL   = 200.0,
-            gradArch = 18.0,
+            NxTotal  = 800,
+            NyBL     = 600,
+            gradBL   = 200.0,  # BL wall-normal expansion ratio (cell size grows toward outer edge)
+            gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
             # Export / post-processing
             outputFormat = "csv",       # csv | binary
             exportMode   = "partial",   # full | partial
             xiInlet      = 0.05,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
-            exportHeight = 20,          # wall-normal from surface [mm]
+            exportHeight = 0.020,       # wall-normal from surface [m]
         ),
 
         # ── Mapping (TunnelCase → AirfoilLECase) ───────────────────────
         mapping = (
             tunnelTime = "163",    # converged time step to sample from
-            zProbe     = 0.005,    # z [m] for sampling
+            zProbe     = 0.005,    # [m] for sampling
         ),
 
         # ── Parallel ────────────────────────────────────────────────────

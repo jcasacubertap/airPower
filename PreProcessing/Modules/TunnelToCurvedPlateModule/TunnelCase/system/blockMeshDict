@@ -19,17 +19,17 @@ FoamFile
 scale 0.001;
 
 // Flat plate length (defined first, used in #calc below)
-     xfp ${flowParam.flatPlateLength};
+     xfp ${flowParam.tunnelLength};
 // Middle-left coordinates
      xor #calc "-0.5*$xfp";
      yor 0;
 // Inlet (top outer) half height
-     yi  ${flowParam.tunnelInletHeight};
+     yi  ${flowParam.tunnelInletHalfHeight};
 // Outlet (top outer) half height
-     yo  ${flowParam.tunnelOutletHeight};
-// z-planes
-     z0  ${flowParam.z0};
-     z1  ${flowParam.z1};
+     yo  ${flowParam.tunnelOutletHalfHeight};
+// z-planes [mm] (quasi-2D, cyclic)
+     z0  -10;
+     z1   10;
 // Grid partitions
      Nx  ${flowParam.Nx};
      Ny  ${flowParam.Ny};

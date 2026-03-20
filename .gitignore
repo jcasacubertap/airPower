@@ -12,6 +12,7 @@
 **/dynamicCode/
 **/postProcessing/
 **/constant/polyMesh/
+**/constant/extendedFeatureEdgeMesh/
 
 # OpenFOAM solution time directories (but keep 0/ for initial conditions)
 **/[1-9]*/

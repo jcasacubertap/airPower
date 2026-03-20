@@ -98,6 +98,10 @@ FoamFile
 //Boundaries information
 Upinlet
 {
+//Domain geometry [m]
+ domainLength  $(p.domainLength);
+ domainHeight  $(p.domainHeight);
+
 //Inflow parameters
  Uinf        $(p.Uinf);
  Winf        $(p.Winf);
@@ -139,6 +143,7 @@ Generate `constant/inputParam` for TunnelCase from the central Julia inputs.
 function write_tunnel_input_param(case_dir::AbstractString)
     f = inp.TTCP.flow
     t = inp.TTCP.tunnel
+    mm(x) = x * 1000.0   # m → mm
     path = joinpath(case_dir, "constant", "inputParam")
     mkpath(dirname(path))
     open(path, "w") do io
@@ -158,22 +163,11 @@ flowParam
 
  //Basic geometry
 
- tunnelInletHeight     $(t.tunnelInletHeight);        // [mm] (tunnel half height)
+ tunnelInletHalfHeight     $(mm(t.tunnelInletHalfHeight));        // [mm] (tunnel half height)
 
- tunnelOutletHeight    $(t.tunnelOutletHeight);        // [mm]
+ tunnelOutletHalfHeight    $(mm(t.tunnelOutletHalfHeight));        // [mm]
 
- flatPlateLength       $(t.flatPlateLength);         //[mm]
-
- z0                    $(t.z0);          // first z-plane [mm]
- z1                     $(t.z1);          // second z-plane [mm]  (quasi-2D thickness)
-
- // Secondary geometrical parameters
-
- seleAR                $(t.seleAR);            // [-]
-
- seleHalfThickness     $(t.seleHalfThickness);           // [mm]
-
- lamTurbHeight         $(t.lamTurbHeight);           // [mm]
+ tunnelLength       $(mm(t.tunnelLength));         //[mm]
 
 //2.- Grid Discretization Parameters
 
@@ -194,16 +188,16 @@ flowParam
  turbulenceIntensity   $(t.turbulenceIntensity);        //[-]
  turbLengthScale       $(t.turbLengthScale);         //[m]
 
-//5.- BSpline Control Points
+//5.- BSpline Control Points [mm]
 
- xcp1 $(t.xcp1);
- ycp1 $(t.ycp1);
+ xcp1 $(mm(t.xcp1));
+ ycp1 $(mm(t.ycp1));
 
- xcp2 $(t.xcp2);
- ycp2 $(t.ycp2);
+ xcp2 $(mm(t.xcp2));
+ ycp2 $(mm(t.ycp2));
 
- xcp3 $(t.xcp3);
- ycp3 $(t.ycp3);
+ xcp3 $(mm(t.xcp3));
+ ycp3 $(mm(t.ycp3));
 }
 
 // ************************************************************************* //""")
@@ -220,7 +214,9 @@ Generate `constant/inputParam` for AirfoilLECase from the central Julia inputs.
 """
 function write_airfoil_le_input_param(case_dir::AbstractString)
     f = inp.TTCP.flow
+    t = inp.TTCP.tunnel
     a = inp.TTCP.airfoilLE
+    mm(x) = x * 1000.0   # m → mm
 
     # ── constant/inputParam ──────────────────────────────────────────────
     path_ip = joinpath(case_dir, "constant", "inputParam")
@@ -249,13 +245,13 @@ Upinlet
  exportMode            $(a.exportMode);  // full | partial
  xiInlet               $(a.xiInlet);     // chord fraction for inlet boundary (x/c)
  xiOutlet              $(a.xiOutlet);     // chord fraction for outlet boundary (x/c)
- exportHeight          $(a.exportHeight);       // wall-normal distance from surface [mm]
+ exportHeight          $(mm(a.exportHeight));       // wall-normal distance from surface [mm]
 
 //Airfoil geometry
- chord                 $(f.chord);      // [mm]
- alphaDeg              $(f.alphaDeg);     // [deg]
- xCenter               $(f.xCenter);     // [mm]
- yCenter               $(f.yCenter);     // [mm]
+ chord                 $(mm(t.chord));      // [mm]
+ alphaDeg              $(t.alphaDeg);     // [deg]
+ xCenter               $(mm(t.xCenter));     // [mm]
+ yCenter               $(mm(t.yCenter));     // [mm]
 }
 
 // ************************************************************************* //""")

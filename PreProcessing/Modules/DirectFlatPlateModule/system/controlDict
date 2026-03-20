@@ -98,8 +98,8 @@ functions
             const dictionary& d = inputParam.subDict("Upinlet");
             const word fmt = d.lookupOrDefault<word>("outputFormat", "csv");
 
-            const scalar zTarget = 1e-5;
-            const scalar zTol    = 2.5e-5;
+            const scalar zTarget = 0.0;
+            const scalar zTol    = 5e-4;
 
             // Collect cells on the mid-plane
             DynamicList<label> cells;

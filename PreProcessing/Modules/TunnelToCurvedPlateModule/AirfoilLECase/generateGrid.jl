@@ -84,22 +84,23 @@ end
 include(find_ancestor_file(@__DIR__, "inputs.jl"))
 
 function load_params()
-    f = inp.TTCP.flow
+    t = inp.TTCP.tunnel
     a = inp.TTCP.airfoilLE
+    mm(x) = x * 1000.0   # inputs.jl stores [m], generateGrid works in [mm]
 
-    # — Airfoil characteristics (shared) —
-    global CHORD      = Float64(f.chord)
-    global ALPHA_DEG  = Float64(f.alphaDeg)
-    global X_CENTER   = Float64(f.xCenter)
-    global Y_CENTER   = Float64(f.yCenter)
+    # — Airfoil characteristics —
+    global CHORD      = mm(t.chord)
+    global ALPHA_DEG  = Float64(t.alphaDeg)
+    global X_CENTER   = mm(t.xCenter)
+    global Y_CENTER   = mm(t.yCenter)
 
     # — Domain size —
     global XI_ARCH             = Float64(a.xiArch)
     global XI_SUCTION_OUTLET   = Float64(a.xiSuctionOutlet)
     global XI_PRESSURE_OUTLET  = Float64(a.xiPressureOutlet)
-    global H_BL       = Float64(a.hBL)
-    global H_FAR      = Float64(a.hFar)
-    global Z_WIDTH    = Float64(a.zWidth)
+    global H_BL       = mm(a.hBL)
+    global H_FAR      = mm(a.hFar)
+    global Z_WIDTH    = 2.0           # [mm] spanwise extent (quasi-2D, cyclic)
     global NS_SUCTION  = Int(a.nSegSuction)
     global NS_ARCH_UP  = Int(a.nSegArchUp)
     global NS_ARCH_LO  = Int(a.nSegArchLo)
@@ -107,9 +108,9 @@ function load_params()
     global COSINE_ARCH = Bool(a.cosineArch)
 
     # — Grid resolution —
-    global NX_TOTAL    = Int(a.nxTotal)
-    global NY_BL       = Int(a.nyBL)
-    global NZ          = Int(a.nz)
+    global NX_TOTAL    = Int(a.NxTotal)
+    global NY_BL       = Int(a.NyBL)
+    global NZ          = 2              # spanwise cells (quasi-2D)
     global GRAD_BL     = Float64(a.gradBL)
     global GRAD_ARCH   = Float64(a.gradArch)
 end

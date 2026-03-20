@@ -6,7 +6,7 @@ const MODULE_REGISTRY = Dict{String, Function}()
 """
     run_module(name, action_str; root)
 
-Main entry point. `name` is the module name (e.g. "BaseFlowGenerator"),
+Main entry point. `name` is the module name (e.g. "DirectFlatPlate"),
 `action_str` is one of "clean", "mesh", "solve", "post", "viz", or "all".
 `root` is the airPower project root directory.
 """
