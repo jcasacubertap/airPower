@@ -12,7 +12,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
     generate_grid = joinpath(airfoil_case, "generateGrid.jl")
     map_script    = joinpath(tunnel_to_curved, "mapTunnelToAirfoilLE.jl")
 
-    airfoil_data_dir = joinpath(root, "PreProcessing", "InputOutput", "AirfoilData")
+    airfoil_data_dir = joinpath(root, "PreProcessing", "InputOutput", "AirfoilGeometryData")
     airfoil2stl      = joinpath(root, "PreProcessing", "Scripts", "SelfRunning", "airfoil2stl.sh")
     tri_surface_dir  = joinpath(tunnel_case, "constant", "triSurface")
 
@@ -63,7 +63,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             @info "  surfaceTransformPoints: chord=$(chord), alpha=$(aoa)°, center=($(t.xCenter),$(t.yCenter))"
             foam_exec(backend, tunnel_case,
                       "surfaceTransformPoints" *
-                      " -scale '($chord $chord $chord)'" *
+                      " -scale '($chord $chord 1)'" *
                       " -translate '($dx 0 $dy)'" *
                       " -origin '($xo 0 $yo)'" *
                       " -rollPitchYaw '(0 0 $(-aoa))'" *
@@ -99,55 +99,50 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             foam_exec(backend, airfoil_case, "blockMesh")
         end,
 
-        :mesh => () -> begin
+        :runTunnel => () -> begin
             write_tunnel_input_param(tunnel_case)
-            write_airfoil_le_input_param(airfoil_case)
-
-            @info "Meshing TunnelCase (blockMesh)..."
-            foam_exec(backend, tunnel_case, "blockMesh")
-            @info "Meshing TunnelCase (snappyHexMesh)..."
-            foam_exec(backend, tunnel_case, "snappyHexMesh")
-
-            @info "Generating AirfoilLECase grid..."
-            run_julia_subprocess(generate_grid; dir=airfoil_case)
-            @info "Meshing AirfoilLECase..."
-            foam_exec(backend, airfoil_case, "blockMesh")
-        end,
-
-        :solve => () -> begin
-            write_tunnel_input_param(tunnel_case)
-            write_airfoil_le_input_param(airfoil_case)
 
             @info "Solving TunnelCase..."
             foam_script(backend, tunnel_case, "run")
+        end,
+
+        :map => () -> begin
             @info "Mapping tunnel → airfoil..."
             run_julia_subprocess(map_script; dir=tunnel_to_curved)
+        end,
+
+        :runAirfoil => () -> begin
+            write_airfoil_le_input_param(airfoil_case)
+
             @info "Solving AirfoilLECase..."
             foam_script(backend, airfoil_case, "run")
         end,
 
-        :post => () -> begin
+        :postAirfoil => () -> begin
             @info "Post-processing AirfoilLECase..."
             foam_script(backend, airfoil_case, "runPostProcess")
         end,
 
-        :viz => () -> begin
+        :vizTunnel => () -> begin
+            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
+                                       "TunnelToCurvedPlate")
+            return plot_residuals(tunnel_case; savedir=plotting_dir, label="TunnelCase")
+        end,
+
+        :vizAirfoil => () -> begin
             plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
                                        "TunnelToCurvedPlate")
 
-            # Residuals for both cases
-            res_tunnel  = plot_residuals(tunnel_case;  savedir=plotting_dir, label="TunnelCase")
             res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECase")
-
-            # Field contours from AirfoilLECase midPlane
             fields = plot_fields(airfoil_case; savedir=plotting_dir)
-
-            # BL profiles
             bl = plot_profiles(airfoil_case; savedir=plotting_dir)
 
-            return (res_tunnel=res_tunnel, res_airfoil=res_airfoil,
-                    fields=fields, bl=bl)
+            return (res_airfoil=res_airfoil, fields=fields, bl=bl)
         end,
+
+        :_order => () -> [:clean, :prep, :meshTunnel, :runTunnel,
+                          :meshAirfoil, :map, :runAirfoil, :postAirfoil,
+                          :vizTunnel, :vizAirfoil],
     )
 end
 

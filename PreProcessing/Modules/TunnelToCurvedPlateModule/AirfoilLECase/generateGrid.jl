@@ -90,7 +90,7 @@ end
 # Resolve .dat path from inputs
 const _AIRFOIL_DAT = let
     dir = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
-    joinpath(dir, "PreProcessing", "InputOutput", "AirfoilData", inp.TTCP.tunnel.airfoilFile)
+    joinpath(dir, "PreProcessing", "InputOutput", "AirfoilGeometryData", inp.TTCP.tunnel.airfoilFile)
 end
 const XI_DATA, ETA_DATA = load_airfoil_upper(_AIRFOIL_DAT)
 

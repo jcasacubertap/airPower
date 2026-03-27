@@ -20,16 +20,16 @@ solvers
     p
     {
         solver          GAMG;
-        tolerance       1e-07;
-        relTol          0.1;
+        tolerance       1e-08;
+        relTol          0.01;
         smoother        GaussSeidel;
     }
 
     U
     {
         solver          smoothSolver;
-        tolerance       1e-06;
-        relTol          0.1;
+        tolerance       1e-08;
+        relTol          0.01;
         smoother        GaussSeidel;
     }
 }

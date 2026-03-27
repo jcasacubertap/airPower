@@ -1,4 +1,4 @@
-const ALL_ACTIONS = [:clean, :prep, :mesh, :solve, :post, :viz]
+const DEFAULT_ALL_ACTIONS = [:clean, :prep, :mesh, :solve, :post, :viz]
 
 # Registry populated after module files are included
 const MODULE_REGISTRY = Dict{String, Function}()
@@ -23,7 +23,7 @@ function run_module(name::AbstractString, action_str::AbstractString="all";
     mod = MODULE_REGISTRY[name](backend, root)
 
     actions = if action_str == "all"
-        ALL_ACTIONS
+        haskey(mod, :_order) ? mod[:_order]() : DEFAULT_ALL_ACTIONS
     else
         [Symbol(action_str)]
     end
@@ -31,8 +31,9 @@ function run_module(name::AbstractString, action_str::AbstractString="all";
     result = nothing
     for action in actions
         if !haskey(mod, action)
-            @warn "Module '$name' does not support action :$action — skipping"
-            continue
+            avail = filter(k -> k != :_order, collect(keys(mod)))
+            error("Module '$name' does not support action :$action. " *
+                  "Available: $(join(avail, ", "))")
         end
         @info "=== $name : $action ==="
         result = mod[action]()

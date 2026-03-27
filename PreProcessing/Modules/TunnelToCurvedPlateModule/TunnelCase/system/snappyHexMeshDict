@@ -16,7 +16,7 @@ FoamFile
 
 // Which of the steps to run
 castellatedMesh true;
-snap            false;
+snap            true;
 addLayers       false;
 
 // Geometry. Definition of all surfaces. All surfaces are of class
@@ -95,7 +95,7 @@ castellatedMeshControls
 	(
 		{
 	    	file "airfoil.eMesh";
-	    	level 5;
+	    	level 4;
 		}
 	);
 
@@ -113,7 +113,7 @@ castellatedMeshControls
         airfoil
         {
             // Surface-wise min and max refinement level
-            level (3 5);
+            level (3 4);
             patchInfo { type wall; }
         }
     }

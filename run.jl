@@ -3,9 +3,13 @@
 # airPower orchestrator
 #
 # Usage:
-#   julia run.jl TunnelToCurvedPlate all   # two-step: tunnel → curved plate
-#   julia run.jl DirectFlatPlate all       # direct flat-plate computation
-#   julia run.jl DirectFlatPlate viz       # visualization only
+#   julia run.jl TunnelToCurvedPlate all          # full pipeline: tunnel → curved plate
+#   julia run.jl TunnelToCurvedPlate meshTunnel   # mesh tunnel only
+#   julia run.jl TunnelToCurvedPlate runTunnel    # solve tunnel only
+#   julia run.jl TunnelToCurvedPlate map          # map tunnel → airfoil BCs
+#   julia run.jl TunnelToCurvedPlate runAirfoil   # solve airfoil only
+#   julia run.jl DirectFlatPlate all              # direct flat-plate computation
+#   julia run.jl DirectFlatPlate viz              # visualization only
 #
 
 const ROOT = @__DIR__
@@ -16,12 +20,19 @@ include(joinpath(ROOT, "inputs.jl"))
 # Include all source files
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "backend.jl"))
 
+# Auxiliary functions (must come before source files that use them)
+include(joinpath(ROOT, "PreProcessing", "Scripts", "Auxiliary", "leastSquares.jl"))
+include(joinpath(ROOT, "PreProcessing", "Scripts", "Auxiliary", "falknerSkan.jl"))
+
 # Plotting (must come before modules that reference plot functions)
 using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings
 default(fontfamily = "Computer Modern")
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "residuals.jl"))
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "fields.jl"))
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "profiles.jl"))
+
+# External-to-scaling preprocessing
+include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "externalToScaling.jl"))
 
 # Module definitions and pipeline
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "pipeline.jl"))

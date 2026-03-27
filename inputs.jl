@@ -118,4 +118,16 @@ const inp = (
         nProcs = 12,
     ),
 
+    # ======================================================================
+    # VAL — Validation / internal preprocessing (not OpenFOAM case inputs)
+    # ======================================================================
+    VAL = (
+        externalToScaling = (
+            flowDataFile = "M3J_Case_Q_25_AOA_3.017_Re_2171263.mat",  # in InputOutput/AirfoilFlowData/
+            percentCrop  = 5.0,           # start cropping at this % of chord
+            Nfit         = 4,             # polynomial order
+            fitLaw       = :logarithmic,  # :monomial or :logarithmic
+        ),
+    ),
+
 )

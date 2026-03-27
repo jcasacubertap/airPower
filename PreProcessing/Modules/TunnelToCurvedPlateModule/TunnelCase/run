@@ -1,9 +1,13 @@
 #!/bin/sh
+set -e
 
 # Back up parametric initial condition files
 cp -r 2 2.bak
 
-decomposePar -time 2
+# Copy initial field files into the snappyHexMesh time directory
+cp 0/U 0/p 0/k 0/omega 0/nut 2/
+
+decomposePar -force -time 2
 mpirun -np 8 --oversubscribe simpleFoam -parallel
 reconstructPar
 

@@ -3,7 +3,7 @@ using DelimitedFiles, Printf, LaTeXStrings
 # Airfoil data (ξ = x/c, η = y/c, LE → TE), upper surface only.
 # Loaded from the .dat file specified in inputs.jl.
 const XI_DATA, ETA_DATA = let
-    dat = joinpath(@__DIR__, "..", "..", "InputOutput", "AirfoilData",
+    dat = joinpath(@__DIR__, "..", "..", "InputOutput", "AirfoilGeometryData",
                    inp.TTCP.tunnel.airfoilFile)
     load_airfoil_upper(dat)
 end
