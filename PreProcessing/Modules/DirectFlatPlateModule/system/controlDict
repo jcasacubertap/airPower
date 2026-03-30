@@ -99,7 +99,7 @@ functions
             const word fmt = d.lookupOrDefault<word>("outputFormat", "csv");
 
             const scalar zTarget = 0.0;
-            const scalar zTol    = 5e-4;
+            const scalar zTol    = 1e-3;
 
             // Collect cells on the mid-plane
             DynamicList<label> cells;

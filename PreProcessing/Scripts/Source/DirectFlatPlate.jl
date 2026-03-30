@@ -35,7 +35,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
                 savedir      = plotting_dir,
             )
 
-            @info "Scaling properties at cropped inlet airfoil %" delta0=result.delta0 uinf=result.uinf beta_FSK=result.beta_FSK arclength=(result.S_crop[1])
+            @info "Scaling properties at (virtual inlet) airfoil chord %" delta0=result.delta0 uinf=result.uinf beta_FSK=result.beta_FSK arclength=(result.S_crop[1])
             @info "Polynomial coefficients (highest order first):"
             for (i, c) in enumerate(result.ue_pol_coeff)
                 @info "  a$(length(result.ue_pol_coeff)-i) = $c"

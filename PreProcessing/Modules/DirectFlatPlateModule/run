@@ -5,3 +5,8 @@ NP=${1:-8}
 decomposePar
 mpirun -np "$NP" --oversubscribe simpleFoam -parallel
 reconstructPar
+
+# Collect inlet data files generated during parallel run
+for f in FSC_inletData.dat FSC_inletProfile.dat; do
+    [ -f "processor0/$f" ] && cp "processor0/$f" .
+done

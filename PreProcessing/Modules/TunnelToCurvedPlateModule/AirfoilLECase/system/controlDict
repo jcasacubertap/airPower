@@ -57,41 +57,21 @@ functions
         fields (U p);             // track these fields' residuals
     }
 
-    //wallShearStress
-    //{
-    //type                 wallShearStress;
-    //libs                 ("libfieldFunctionObjects.so");
-    //executeControl       writeTime;
-    //writeControl         writeTime;
-    //}
+    wallShearStress
+    {
+        type            wallShearStress;
+        libs            ("libfieldFunctionObjects.so");
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
 
-    //wallPressure
-    //{
-    //type                 surfaces;
-    //functionObjectLibs   ("libsampling.so");
-    //outputControl        outputTime;
-    //surfaceFormat        foam;
-    //interpolationScheme  cell;
-
-    //fields (p);
-    //surfaces
-    //(
-    // flatPlate
-    //{
-    // type patch;
-    // patches (flatPlate);
-    // interpolate true;
-    // triangulate false;
-    //}
-    // upperWall
-    //{
-    // type patch;
-    // patches (upperWall);
-    // interpolate true;
-    // triangulate false;
-    //}
-    //);
-    //}
+    yPlus
+    {
+        type            yPlus;
+        libs            ("libfieldFunctionObjects.so");
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
 
     writeMidPlane
     {
@@ -145,8 +125,16 @@ functions
                 }
             }
 
+            // ── Read flow parameters for Cp/Cf scaling ──
+            const scalar Uinf_ = d.lookupOrDefault<scalar>("freeStreamVelocityStreamwise", 25.0);
+            const scalar Winf_ = d.lookupOrDefault<scalar>("freeStreamVelocitySpanwise", 0.0);
+            const scalar Umag_ = std::sqrt(Uinf_*Uinf_ + Winf_*Winf_);
+            const scalar qInf  = 0.5 * Umag_ * Umag_;  // dynamic pressure (kinematic)
+
             // ── Final cell list (full or partial) ──
             DynamicList<label> cells;
+            DynamicList<scalar> localWall;
+            DynamicList<scalar> localWallQ;  // wall quantities: x, p, cf, yplus per face
 
             if (mode == "partial")
             {
@@ -164,42 +152,14 @@ functions
                 const scalar xCtrM      = xCtr * 0.001;
                 const scalar yCtrM      = yCtr * 0.001;
 
-                // ── Embedded M3J upper-surface data (65 points) ──
-                static const int N_PTS = 65;
-                static const double XI_D[65] = {
-                    0.0,      0.001313, 0.003646, 0.007137, 0.011779,
-                    0.017562, 0.024472, 0.032492, 0.041604, 0.051787,
-                    0.063016, 0.075266, 0.088508, 0.10271,  0.11784,
-                    0.13387,  0.15074,  0.16844,  0.18691,  0.20611,
-                    0.22599,  0.24652,  0.26764,  0.2893,   0.31145,
-                    0.33405,  0.35703,  0.38034,  0.40394,  0.42776,
-                    0.45174,  0.47584,  0.5,      0.52416,  0.54826,
-                    0.57224,  0.59606,  0.61966,  0.64297,  0.66595,
-                    0.68855,  0.7107,   0.73236,  0.75348,  0.77401,
-                    0.79389,  0.81309,  0.83156,  0.84926,  0.86613,
-                    0.88216,  0.89729,  0.91149,  0.92473,  0.93698,
-                    0.94821,  0.9584,   0.96751,  0.97553,  0.98244,
-                    0.98822,  0.99286,  0.99635,  0.99869,  1.0
-                };
-                static const double ETA_D[65] = {
-                    0.0,      0.005524, 0.009305, 0.013007, 0.016561,
-                    0.019935, 0.023174, 0.026436, 0.029709, 0.033033,
-                    0.036384, 0.039752, 0.043132, 0.046513, 0.049875,
-                    0.053194, 0.056452, 0.059635, 0.062735, 0.065716,
-                    0.068591, 0.071357, 0.073995, 0.076469, 0.078799,
-                    0.080952, 0.082919, 0.084694, 0.086235, 0.087554,
-                    0.088594, 0.089378, 0.089851, 0.09002,  0.089814,
-                    0.08923,  0.088209, 0.086598, 0.084245, 0.080977,
-                    0.077081, 0.07263,  0.067808, 0.062635, 0.057286,
-                    0.051831, 0.046364, 0.040993, 0.035807, 0.03088,
-                    0.026254, 0.021944, 0.017969, 0.014393, 0.011285,
-                    0.00868,  0.006551, 0.004917, 0.003622, 0.002599,
-                    0.001744, 0.001056, 0.00054,  0.000194, 0.0
-                };
+                // ── Read upper-surface airfoil data from inputParam ──
+                const scalarField XI_D(d.lookup("airfoilXi"));
+                const scalarField ETA_D(d.lookup("airfoilEta"));
+                const int N_PTS = XI_D.size();
 
                 // ── Geometry helper lambdas ──
                 // Linear interpolation in sorted table
-                auto interp1 = [](const double* xd, const double* yd,
+                auto interp1 = [](const scalarField& xd, const scalarField& yd,
                                   int n, double xq) -> double
                 {
                     if (xq <= xd[0])   return yd[0];
@@ -334,10 +294,50 @@ functions
                     cells.append(ci);
                 }
 
+                // ── Collect wall face data in the exported region ──
+                const fvPatchScalarField& pw = p.boundaryField()[patchID];
+
+                // Read OpenFOAM-computed wallShearStress and yPlus fields
+                const volVectorField& wss =
+                    mesh.lookupObject<volVectorField>("wallShearStress");
+                const volScalarField& yPlusField =
+                    mesh.lookupObject<volScalarField>("yPlus");
+                const vectorField& wssPatch = wss.boundaryField()[patchID];
+                const scalarField& ypPatch  = yPlusField.boundaryField()[patchID];
+
+                forAll(faceCentres, fi)
+                {
+                    if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+
+                    double fx = faceCentres[fi].x();
+                    double fy = faceCentres[fi].y();
+
+                    double dotIn = (fx - pInX)*tInX + (fy - pInY)*tInY;
+                    if (dotIn < 0) continue;
+                    double dotOut = (fx - pOutX)*tOutX + (fy - pOutY)*tOutY;
+                    if (dotOut > 0) continue;
+
+                    // Suction side only
+                    if (-faceNormals[fi].y() < 0) continue;
+
+                    localWall.append(fx);
+                    localWall.append(fy);
+
+                    // Wall quantities from OpenFOAM function objects
+                    double cp = pw[fi] / qInf;
+                    double cf = mag(wssPatch[fi]) / qInf;
+                    double yp = ypPatch[fi];
+                    localWallQ.append(fx);
+                    localWallQ.append(cp);
+                    localWallQ.append(cf);
+                    localWallQ.append(yp);
+                }
+
                 Info<< "writeMidPlane: partial mode — "
                     << "xiInlet=" << xiInlet_ << " xiOutlet=" << xiOutlet_
                     << " exportHeight=" << expHeight << " mm"
-                    << " → " << cells.size() << " cells selected" << endl;
+                    << " → " << cells.size() << " cells, "
+                    << localWall.size()/2 << " wall faces selected" << endl;
             }
             else
             {
@@ -363,6 +363,14 @@ functions
             List<List<scalar>> allData(Pstream::nProcs());
             allData[Pstream::myProcNo()] = localData;
             Pstream::gatherList(allData);
+
+            List<List<scalar>> allWall(Pstream::nProcs());
+            allWall[Pstream::myProcNo()] = localWall;
+            Pstream::gatherList(allWall);
+
+            List<List<scalar>> allWallQ(Pstream::nProcs());
+            allWallQ[Pstream::myProcNo()] = localWallQ;
+            Pstream::gatherList(allWallQ);
 
             // ── Write output (master only) ──
             if (Pstream::master())
@@ -425,6 +433,59 @@ functions
 
                     Info<< "writeMidPlane: wrote " << totalRows
                         << " cells (csv) to " << os.name() << endl;
+                }
+
+                // ── Write wall coordinates ──
+                label totalWallPts = 0;
+                forAll(allWall, proci)
+                {
+                    totalWallPts += allWall[proci].size() / 2;
+                }
+
+                if (totalWallPts > 0)
+                {
+                    OFstream wos(outDir/"wallCoordinates.csv");
+                    wos.precision(10);
+                    wos << "x,y" << nl;
+
+                    forAll(allWall, proci)
+                    {
+                        const List<scalar>& wd = allWall[proci];
+                        for (label i = 0; i < wd.size(); i += 2)
+                        {
+                            wos << wd[i] << "," << wd[i+1] << nl;
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << totalWallPts
+                        << " wall points to " << wos.name() << endl;
+                }
+
+                // ── Write wall quantities (Cp, Cf, y+) ──
+                label totalWallQ = 0;
+                forAll(allWallQ, proci)
+                {
+                    totalWallQ += allWallQ[proci].size() / 4;
+                }
+
+                if (totalWallQ > 0)
+                {
+                    OFstream qos(outDir/"wallQuantities.csv");
+                    qos.precision(10);
+                    qos << "x,Cp,Cf,yPlus" << nl;
+
+                    forAll(allWallQ, proci)
+                    {
+                        const List<scalar>& qd = allWallQ[proci];
+                        for (label i = 0; i < qd.size(); i += 4)
+                        {
+                            qos << qd[i] << "," << qd[i+1] << ","
+                                << qd[i+2] << "," << qd[i+3] << nl;
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << totalWallQ
+                        << " wall quantities to " << qos.name() << endl;
                 }
             }
         #};

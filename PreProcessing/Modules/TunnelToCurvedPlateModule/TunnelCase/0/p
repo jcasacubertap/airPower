@@ -41,11 +41,11 @@ boundaryField
     }
     right
     {
-        type            empty;
+        type            cyclic;
     }
     left
     {
-        type            empty;
+        type            cyclic;
     }
     airfoil
     {

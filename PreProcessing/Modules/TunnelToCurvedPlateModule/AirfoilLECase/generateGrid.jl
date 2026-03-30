@@ -1056,7 +1056,7 @@ function compute_patches(Nv::Int)::Vector{PatchDef}
         push!(fr, (i, i+1, Nv+i+1, Nv+i))
         push!(fr, (Nv+i, Nv+i+1, 2Nv+i+1, 2Nv+i))
     end
-    push!(patches, PatchDef("front", "empty", fr))
+    push!(patches, PatchDef("front", "cyclic", fr))
 
     # ---- back: all block faces at z = +Z_WIDTH/2 ----
     bk = Face[]
@@ -1064,7 +1064,7 @@ function compute_patches(Nv::Int)::Vector{PatchDef}
         push!(bk, (3Nv+i, 3Nv+i+1, 4Nv+i+1, 4Nv+i))
         push!(bk, (4Nv+i, 4Nv+i+1, 5Nv+i+1, 5Nv+i))
     end
-    push!(patches, PatchDef("back", "empty", bk))
+    push!(patches, PatchDef("back", "cyclic", bk))
 
     return patches
 end
@@ -1141,8 +1141,13 @@ scale 0.001;   // vertices in mm → metres
 
         # ---- Boundary ----
         println(io, "boundary\n(")
+        # Build cyclic neighbour map
+        cyclic_neighbour = Dict("front" => "back", "back" => "front")
         for p in patches
             println(io, "    $(p.name)\n    {\n        type $(p.ptype);")
+            if p.ptype == "cyclic" && haskey(cyclic_neighbour, p.name)
+                println(io, "        neighbourPatch  $(cyclic_neighbour[p.name]);")
+            end
             println(io, "        faces\n        (")
             for f in p.faces
                 println(io, "            ($(f[1]) $(f[2]) $(f[3]) $(f[4]))")

@@ -197,8 +197,9 @@ end
 function write_sample_dict(patch_centers::Dict{String, Vector{NTuple{3,Float64}}})
     dict_path = joinpath(TUNNEL_CASE, "system", "sampleDict")
 
-    open(dict_path, "w") do io
-        print(io, """
+    # Build content in memory
+    buf = IOBuffer()
+    print(buf, """
 /*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -227,25 +228,37 @@ sets
 {
 """)
 
-        for (patch_name, centers) in patch_centers
-            set_name = patch_name * "Probes"
-            println(io, "    $set_name")
-            println(io, "    {")
-            println(io, "        type    cloud;")
-            println(io, "        axis    xyz;")
-            println(io, "        points")
-            println(io, "        (")
-            for c in centers
-                @printf(io, "            (%.10g %.10g %.10g)\n",
-                        c[1], c[2], Z_PROBE)
-            end
-            println(io, "        );")
-            println(io, "    }")
+    for (patch_name, centers) in patch_centers
+        set_name = patch_name * "Probes"
+        println(buf, "    $set_name")
+        println(buf, "    {")
+        println(buf, "        type    cloud;")
+        println(buf, "        axis    xyz;")
+        println(buf, "        points")
+        println(buf, "        (")
+        for c in centers
+            @printf(buf, "            (%.10g %.10g %.10g)\n",
+                    c[1], c[2], Z_PROBE)
         end
+        println(buf, "        );")
+        println(buf, "    }")
+    end
 
-        println(io, "}")
-        println(io)
-        println(io, "// ************************************************************************* //")
+    println(buf, "}")
+    println(buf)
+    println(buf, "// ************************************************************************* //")
+
+    content = String(take!(buf))
+
+    # Write via host filesystem
+    open(dict_path, "w") do io
+        print(io, content)
+    end
+
+    # Also write via Docker to bypass VirtioFS cache
+    container_path = docker_case_path(TUNNEL_CASE) * "/system/sampleDict"
+    open(`docker exec -i openfoam2412 bash -c "cat > $container_path"`, "w") do io
+        print(io, content)
     end
 
     println("  Written: $dict_path")

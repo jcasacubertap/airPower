@@ -111,30 +111,30 @@ vertices
 
 blocks
 (
-    hex (39 40 53 52 0 1 14 13)  (87 600 2) simpleGrading (1 200 1)   // block 0
-    hex (52 53 66 65 13 14 27 26)  (87 113 2) simpleGrading (1 1 1)   // block 1
-    hex (40 41 54 53 1 2 15 14)  (87 600 2) simpleGrading (1 200 1)   // block 2
-    hex (53 54 67 66 14 15 28 27)  (87 113 2) simpleGrading (1 1 1)   // block 3
-    hex (41 42 55 54 2 3 16 15)  (87 600 2) simpleGrading (1 200 1)   // block 4
-    hex (54 55 68 67 15 16 29 28)  (87 113 2) simpleGrading (1 1 1)   // block 5
-    hex (42 43 56 55 3 4 17 16)  (87 600 2) simpleGrading (1 200 1)   // block 6
-    hex (55 56 69 68 16 17 30 29)  (87 113 2) simpleGrading (1 1 1)   // block 7
-    hex (43 44 57 56 4 5 18 17)  (87 600 2) simpleGrading (1 200 1)   // block 8
-    hex (56 57 70 69 17 18 31 30)  (87 113 2) simpleGrading (1 1 1)   // block 9
-    hex (44 45 58 57 5 6 19 18)  (87 600 2) simpleGrading (1 200 1)   // block 10
-    hex (57 58 71 70 18 19 32 31)  (87 113 2) simpleGrading (1 1 1)   // block 11
-    hex (45 46 59 58 6 7 20 19)  (17 600 2) simpleGrading (0.516122 200 1)   // block 12
-    hex (58 59 72 71 19 20 33 32)  (17 113 2) simpleGrading (0.516122 1 1)   // block 13
-    hex (46 47 60 59 7 8 21 20)  (94 600 2) simpleGrading (0.119232 200 1)   // block 14
-    hex (59 60 73 72 20 21 34 33)  (94 113 2) simpleGrading (0.119232 1 1)   // block 15
-    hex (47 48 61 60 8 9 22 21)  (54 600 2) simpleGrading (18.5025 200 1)   // block 16
-    hex (60 61 74 73 21 22 35 34)  (54 113 2) simpleGrading (18.5025 1 1)   // block 17
-    hex (48 49 62 61 9 10 23 22)  (14 600 2) simpleGrading (0.59597 200 1)   // block 18
-    hex (61 62 75 74 22 23 36 35)  (14 113 2) simpleGrading (0.59597 1 1)   // block 19
-    hex (49 50 63 62 10 11 24 23)  (50 600 2) simpleGrading (1 200 1)   // block 20
-    hex (62 63 76 75 23 24 37 36)  (50 113 2) simpleGrading (1 1 1)   // block 21
-    hex (50 51 64 63 11 12 25 24)  (50 600 2) simpleGrading (1 200 1)   // block 22
-    hex (63 64 77 76 24 25 38 37)  (50 113 2) simpleGrading (1 1 1)   // block 23
+    hex (39 40 53 52 0 1 14 13)  (158 200 2) simpleGrading (1 200 1)   // block 0
+    hex (52 53 66 65 13 14 27 26)  (158 38 2) simpleGrading (1 1 1)   // block 1
+    hex (40 41 54 53 1 2 15 14)  (158 200 2) simpleGrading (1 200 1)   // block 2
+    hex (53 54 67 66 14 15 28 27)  (158 38 2) simpleGrading (1 1 1)   // block 3
+    hex (41 42 55 54 2 3 16 15)  (158 200 2) simpleGrading (1 200 1)   // block 4
+    hex (54 55 68 67 15 16 29 28)  (158 38 2) simpleGrading (1 1 1)   // block 5
+    hex (42 43 56 55 3 4 17 16)  (158 200 2) simpleGrading (1 200 1)   // block 6
+    hex (55 56 69 68 16 17 30 29)  (158 38 2) simpleGrading (1 1 1)   // block 7
+    hex (43 44 57 56 4 5 18 17)  (158 200 2) simpleGrading (1 200 1)   // block 8
+    hex (56 57 70 69 17 18 31 30)  (158 38 2) simpleGrading (1 1 1)   // block 9
+    hex (44 45 58 57 5 6 19 18)  (158 200 2) simpleGrading (1 200 1)   // block 10
+    hex (57 58 71 70 18 19 32 31)  (158 38 2) simpleGrading (1 1 1)   // block 11
+    hex (45 46 59 58 6 7 20 19)  (23 200 2) simpleGrading (0.968654 200 1)   // block 12
+    hex (58 59 72 71 19 20 33 32)  (23 38 2) simpleGrading (0.968654 1 1)   // block 13
+    hex (46 47 60 59 7 8 21 20)  (92 200 2) simpleGrading (0.115168 200 1)   // block 14
+    hex (59 60 73 72 20 21 34 33)  (92 38 2) simpleGrading (0.115168 1 1)   // block 15
+    hex (47 48 61 60 8 9 22 21)  (55 200 2) simpleGrading (18.088 200 1)   // block 16
+    hex (60 61 74 73 21 22 35 34)  (55 38 2) simpleGrading (18.088 1 1)   // block 17
+    hex (48 49 62 61 9 10 23 22)  (12 200 2) simpleGrading (0.872413 200 1)   // block 18
+    hex (61 62 75 74 22 23 36 35)  (12 38 2) simpleGrading (0.872413 1 1)   // block 19
+    hex (49 50 63 62 10 11 24 23)  (35 200 2) simpleGrading (1 200 1)   // block 20
+    hex (62 63 76 75 23 24 37 36)  (35 38 2) simpleGrading (1 1 1)   // block 21
+    hex (50 51 64 63 11 12 25 24)  (35 200 2) simpleGrading (1 200 1)   // block 22
+    hex (63 64 77 76 24 25 38 37)  (35 38 2) simpleGrading (1 1 1)   // block 23
 );
 
 edges
@@ -277,7 +277,8 @@ boundary
 
     front
     {
-        type empty;
+        type cyclic;
+        neighbourPatch  back;
         faces
         (
             (0 1 14 13)
@@ -309,7 +310,8 @@ boundary
 
     back
     {
-        type empty;
+        type cyclic;
+        neighbourPatch  front;
         faces
         (
             (39 40 53 52)

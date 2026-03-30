@@ -44,8 +44,9 @@ const inp = (
 
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
-            freeStreamVelocity  = 24.84840467482210,        # [m/s]
-            freeStreamViscosity = 1.456610719354608e-5,     # [m^2/s]
+            freeStreamVelocityStreamwise  = 24.84840467482210,  # [m/s]
+            freeStreamVelocitySpanwise    = 20.3,               # [m/s]
+            freeStreamViscosity = 1.456610719354608e-5,         # [m^2/s]
         ),
 
         # ── TunnelCase-specific ─────────────────────────────────────────
@@ -95,8 +96,8 @@ const inp = (
             cosineArch   = true,   # cosine clustering of stations near the LE
 
             # Grid resolution
-            NxTotal  = 800,
-            NyBL     = 600,
+            NxTotal  = 1200,
+            NyBL     = 200,
             gradBL   = 200.0,  # BL wall-normal expansion ratio (cell size grows toward outer edge)
             gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
@@ -110,12 +111,12 @@ const inp = (
 
         # ── Mapping (TunnelCase → AirfoilLECase) ───────────────────────
         mapping = (
-            tunnelTime = "163",    # converged time step to sample from
+            tunnelTime = "450",    # converged time step to sample from
             zProbe     = 0.005,    # [m] for sampling
         ),
 
         # ── Parallel ────────────────────────────────────────────────────
-        nProcs = 12,
+        nProcs = 8,
     ),
 
     # ======================================================================
@@ -128,6 +129,7 @@ const inp = (
             Nfit         = 4,             # polynomial order
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
         ),
+        valPlot = true,   # true: overlay reference data on validation plots
     ),
 
 )

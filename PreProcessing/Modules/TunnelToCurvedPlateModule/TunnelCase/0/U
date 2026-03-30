@@ -16,11 +16,12 @@ FoamFile
 
 #include "../constant/inputParam"
 
-Uinf            ${flowParam.freeStreamVelocity};
+Uinf            ${flowParam.freeStreamVelocityStreamwise};
+Winf            ${flowParam.freeStreamVelocitySpanwise};
 
 dimensions      [0 1 -1 0 0 0 0];
 
-internalField   uniform ($Uinf 0 0);
+internalField   uniform ($Uinf 0 $Winf);
 
 boundaryField
 {
@@ -41,11 +42,11 @@ boundaryField
     }
     left
     {
-        type            empty;
+        type            cyclic;
     }
     right
     {
-        type            empty;
+        type            cyclic;
     }
     upperWall
     {

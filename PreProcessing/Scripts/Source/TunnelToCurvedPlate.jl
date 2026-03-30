@@ -41,11 +41,12 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             @info "  airfoil2stl: $(t.airfoilFile) → $(base).stl"
             run(`bash $airfoil2stl $dat_file $raw_stl $z_span`)
 
-            # Step 2: Orient normals
+            # Step 2: Orient normals (write to /tmp to avoid Docker mount write issues)
             @info "  surfaceOrient → $(base)_oriented.stl"
             outside_pt = "($( t.tunnelLength / 2 ) 0 0)"
             foam_exec(backend, tunnel_case,
-                      "surfaceOrient constant/triSurface/$(base).stl '$(outside_pt)' constant/triSurface/$(base)_oriented.stl")
+                      "surfaceOrient constant/triSurface/$(base).stl '$(outside_pt)' /tmp/$(base)_oriented.stl" *
+                      " && cp /tmp/$(base)_oriented.stl constant/triSurface/$(base)_oriented.stl")
 
             # Step 3: Check surface
             @info "  surfaceCheck..."
@@ -68,7 +69,8 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                       " -origin '($xo 0 $yo)'" *
                       " -rollPitchYaw '(0 0 $(-aoa))'" *
                       " constant/triSurface/$(base)_oriented.stl" *
-                      " constant/triSurface/airfoil.stl")
+                      " /tmp/airfoil.stl" *
+                      " && cp /tmp/airfoil.stl constant/triSurface/airfoil.stl")
 
             # Step 5: Extract feature edges
             @info "  surfaceFeatureExtract..."
@@ -103,7 +105,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             write_tunnel_input_param(tunnel_case)
 
             @info "Solving TunnelCase..."
-            foam_script(backend, tunnel_case, "run")
+            foam_script(backend, tunnel_case, "run", "$(inp.TTCP.nProcs)")
         end,
 
         :map => () -> begin
@@ -114,13 +116,35 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         :runAirfoil => () -> begin
             write_airfoil_le_input_param(airfoil_case)
 
+            # Solve in /tmp to work around Docker VirtioFS OFstream issue
             @info "Solving AirfoilLECase..."
-            foam_script(backend, airfoil_case, "run")
+            work = "/tmp/AirfoilLECase_run"
+            foam_exec(backend, airfoil_case,
+                "rm -rf $work && cp -r . $work && cd $work" *
+                " && decomposePar -force" *
+                " && mpirun -np $(inp.TTCP.nProcs) --oversubscribe simpleFoam -parallel" *
+                " && reconstructPar" *
+                " && latestTime=\$(ls -1d [0-9]* 2>/dev/null | sort -g | tail -1)" *
+                " && [ -n \"\$latestTime\" ] && [ \"\$latestTime\" != \"0\" ]" *
+                " && cp -r \"\$latestTime\" \"\$OLDPWD/\"" *
+                " ; rm -rf $work")
         end,
 
         :postAirfoil => () -> begin
             @info "Post-processing AirfoilLECase..."
-            foam_script(backend, airfoil_case, "runPostProcess")
+            work = "/tmp/AirfoilLECase_post"
+            # Run postProcess in /tmp (VirtioFS workaround)
+            foam_exec(backend, airfoil_case,
+                "rm -rf $work && cp -r . $work && cd $work" *
+                " && rm -rf dynamicCode postProcessing" *
+                " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
+            # Copy results back via docker cp (bypasses VirtioFS mount issues)
+            pp_dest = joinpath(airfoil_case, "postProcessing")
+            rm(pp_dest; force=true, recursive=true)
+            run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
+            # Clean up
+            foam_exec(backend, airfoil_case, "rm -rf $work")
+            @info "Post-processing complete"
         end,
 
         :vizTunnel => () -> begin
@@ -134,10 +158,16 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                                        "TunnelToCurvedPlate")
 
             res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECase")
-            fields = plot_fields(airfoil_case; savedir=plotting_dir)
-            bl = plot_profiles(airfoil_case; savedir=plotting_dir)
+            a = inp.TTCP.airfoilLE
+            geom_args = (chord_mm=t.chord * 1000, alpha_deg=t.alphaDeg,
+                         x_center_mm=t.xCenter * 1000, y_center_mm=t.yCenter * 1000)
+            fields = plot_fields(airfoil_case; savedir=plotting_dir,
+                delta=a.exportHeight, geom_args...)
+            wall = plot_wall_geometry(airfoil_case; savedir=plotting_dir, geom_args...)
+            wallq = plot_wall_quantities(airfoil_case; savedir=plotting_dir, geom_args...)
+            cpval = plot_cp_validation(airfoil_case; savedir=plotting_dir, geom_args...)
 
-            return (res_airfoil=res_airfoil, fields=fields, bl=bl)
+            return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq, cpval=cpval)
         end,
 
         :_order => () -> [:clean, :prep, :meshTunnel, :runTunnel,

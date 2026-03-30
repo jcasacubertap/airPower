@@ -155,7 +155,8 @@ boundary
 
     right
     {
-        type            empty;
+        type            cyclic;
+        neighbourPatch  left;
         faces
         (
            (0 2 4 6)
@@ -165,7 +166,8 @@ boundary
 
     left
     {
-        type            empty;
+        type            cyclic;
+        neighbourPatch  right;
         faces
         (
            (1 3 5 7)
