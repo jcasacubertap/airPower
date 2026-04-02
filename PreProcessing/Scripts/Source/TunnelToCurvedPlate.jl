@@ -86,10 +86,19 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         :meshTunnel => () -> begin
             write_tunnel_input_param(tunnel_case)
 
-            @info "Meshing TunnelCase (blockMesh)..."
-            foam_exec(backend, tunnel_case, "blockMesh")
-            @info "Meshing TunnelCase (snappyHexMesh)..."
-            foam_exec(backend, tunnel_case, "snappyHexMesh")
+            work = "/tmp/TunnelCase_mesh"
+            @info "Meshing TunnelCase..."
+            foam_exec(backend, tunnel_case,
+                "rm -rf $work && cp -r . $work && cd $work" *
+                " && blockMesh && snappyHexMesh")
+            # Copy mesh back via docker cp
+            tc_docker = docker_case_path(tunnel_case)
+            for d in ["constant/polyMesh", "constant/triSurface", "constant/extendedFeatureEdgeMesh", "1", "2"]
+                run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "[ -d $work/$d ] && rm -rf $tc_docker/$d && cp -r $work/$d $tc_docker/$d"`))
+            end
+            foam_exec(backend, tunnel_case, "rm -rf $work")
+            @info "Meshing complete"
         end,
 
         :meshAirfoil => () -> begin
@@ -97,6 +106,9 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
             @info "Generating AirfoilLECase grid..."
             run_julia_subprocess(generate_grid; dir=airfoil_case)
+            # Push blockMeshDict into Docker (VirtioFS truncates large files)
+            bmd = joinpath(airfoil_case, "system", "blockMeshDict")
+            run(`docker cp $bmd $(DOCKER_CONTAINER):$(docker_case_path(airfoil_case))/system/blockMeshDict`)
             @info "Meshing AirfoilLECase..."
             foam_exec(backend, airfoil_case, "blockMesh")
         end,
@@ -105,7 +117,24 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             write_tunnel_input_param(tunnel_case)
 
             @info "Solving TunnelCase..."
-            foam_script(backend, tunnel_case, "run", "$(inp.TTCP.nProcs)")
+            work = "/tmp/TunnelCase_run"
+            np = inp.TTCP.nProcs
+            foam_exec(backend, tunnel_case,
+                "rm -rf $work && cp -r . $work && cd $work" *
+                " && cp -r 2 2.bak" *
+                " && cp 0/U 0/p 0/k 0/omega 0/nut 2/" *
+                " && decomposePar -force -time 2" *
+                " && mpirun -np $np --oversubscribe simpleFoam -parallel" *
+                " && reconstructPar" *
+                " && rm -r 2 && mv 2.bak 2")
+            # Copy reconstructed time directory back via docker cp
+            latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                "ls -1d $work/[0-9]* 2>/dev/null | grep -v '^$work/0\$' | grep -v '^$work/2\$' | sort -g | tail -1"`, String) |> strip
+            if !isempty(latest)
+                run(`docker cp $(DOCKER_CONTAINER):$latest $(tunnel_case)/`)
+                @info "Copied time directory: $(basename(latest))"
+            end
+            foam_exec(backend, tunnel_case, "rm -rf $work")
         end,
 
         :map => () -> begin
@@ -123,11 +152,15 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                 "rm -rf $work && cp -r . $work && cd $work" *
                 " && decomposePar -force" *
                 " && mpirun -np $(inp.TTCP.nProcs) --oversubscribe simpleFoam -parallel" *
-                " && reconstructPar" *
-                " && latestTime=\$(ls -1d [0-9]* 2>/dev/null | sort -g | tail -1)" *
-                " && [ -n \"\$latestTime\" ] && [ \"\$latestTime\" != \"0\" ]" *
-                " && cp -r \"\$latestTime\" \"\$OLDPWD/\"" *
-                " ; rm -rf $work")
+                " && reconstructPar")
+            # Copy reconstructed time directory back via docker cp
+            latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                "ls -1d $work/[0-9]* 2>/dev/null | sort -g | tail -1"`, String) |> strip
+            if !isempty(latest) && basename(latest) != "0"
+                run(`docker cp $(DOCKER_CONTAINER):$latest $(airfoil_case)/`)
+                @info "Copied time directory: $(basename(latest))"
+            end
+            foam_exec(backend, airfoil_case, "rm -rf $work")
         end,
 
         :postAirfoil => () -> begin
@@ -162,12 +195,57 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             geom_args = (chord_mm=t.chord * 1000, alpha_deg=t.alphaDeg,
                          x_center_mm=t.xCenter * 1000, y_center_mm=t.yCenter * 1000)
             fields = plot_fields(airfoil_case; savedir=plotting_dir,
-                delta=a.exportHeight, geom_args...)
+                delta=0.010, geom_args...)
             wall = plot_wall_geometry(airfoil_case; savedir=plotting_dir, geom_args...)
             wallq = plot_wall_quantities(airfoil_case; savedir=plotting_dir, geom_args...)
-            cpval = plot_cp_validation(airfoil_case; savedir=plotting_dir, geom_args...)
+            expval = nothing
+            if inp.VAL.valPlot
+                expval = plot_experimental_validation(airfoil_case;
+                    savedir=plotting_dir, gen=inp.VAL.Gen, delta=0.010, geom_args...)
+            end
 
-            return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq, cpval=cpval)
+            return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq,
+                    expval=expval)
+        end,
+
+        :monitorTunnel => () -> begin
+            tmp_dir = mktempdir()
+            dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
+            mkpath(dst)
+            # Parallel runs write solverInfo_0.dat; serial writes solverInfo.dat
+            for f in ["solverInfo_0.dat", "solverInfo.dat"]
+                src = "/tmp/TunnelCase_run/postProcessing/solverInfo/0/$f"
+                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+            end
+            # Rename _0 to plain if needed (plot_residuals expects solverInfo.dat)
+            f0 = joinpath(dst, "solverInfo_0.dat")
+            fd = joinpath(dst, "solverInfo.dat")
+            if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
+                cp(f0, fd; force=true)
+            end
+            p = plot_residuals(tmp_dir; savedir=tmp_dir, label="TunnelCase (live)")
+            rm(tmp_dir; force=true, recursive=true)
+            display(p)
+            return p
+        end,
+
+        :monitorAirfoil => () -> begin
+            tmp_dir = mktempdir()
+            dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
+            mkpath(dst)
+            for f in ["solverInfo_0.dat", "solverInfo.dat"]
+                src = "/tmp/AirfoilLECase_run/postProcessing/solverInfo/0/$f"
+                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+            end
+            f0 = joinpath(dst, "solverInfo_0.dat")
+            fd = joinpath(dst, "solverInfo.dat")
+            if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
+                cp(f0, fd; force=true)
+            end
+            p = plot_residuals(tmp_dir; savedir=tmp_dir, label="AirfoilLECase (live)")
+            rm(tmp_dir; force=true, recursive=true)
+            display(p)
+            return p
         end,
 
         :_order => () -> [:clean, :prep, :meshTunnel, :runTunnel,

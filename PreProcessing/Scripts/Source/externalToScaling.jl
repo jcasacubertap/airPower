@@ -121,10 +121,10 @@ function _plot_external_scaling(; S, expUe, S_crop, expUe_crop, ue_pol, xt,
 
     # (a) Dimensional edge velocity: raw, cropped, polynomial fit
     p1 = plot(S, expUe, color=:black, lw=1.2, label="raw data")
-    plot!(p1, S_crop, expUe_crop, color=:green, lw=1.2,
-          markershape=:circle, ms=2, label="cropped raw data")
-    plot!(p1, S_crop, ue_pol, color=:red, lw=1.2,
-          markershape=:circle, ms=2, label="polynomial fit")
+    plot!(p1, S_crop, expUe_crop, color=:green, lw=0,
+          markershape=:circle, ms=3, markerstrokewidth=0, label="cropped raw data")
+    plot!(p1, S_crop, ue_pol, color=:red, lw=2,
+          ls=:dash, label="polynomial fit")
     vline!(p1, [xt], color=:black, ls=:dash, label=nothing)
     xlabel!(p1, L"S_{\mathrm{exp}}\;(\mathrm{m})")
     ylabel!(p1, L"u_e\;(\mathrm{m/s})")
@@ -146,8 +146,8 @@ function _plot_external_scaling(; S, expUe, S_crop, expUe_crop, ue_pol, xt,
     ylabel!(p3, L"S_{\mathrm{exp}}\;(\mathrm{m})")
     ylims!(p3, (0, maximum(S)))
 
-    fig = plot(p1, p2, p3, layout=(2, 2), size=(900, 700),
-               plot_title="Reference external flow properties")
+    fig = plot(p1, p2, p3, layout=@layout([a{1.0w}; b{0.3w} c{0.7w}]),
+               size=(900, 700), plot_title="Reference external flow properties", dpi=200)
 
     savefig(fig, joinpath(savedir, "externalToScaling.png"))
     @info "Saved diagnostic plot" path=joinpath(savedir, "externalToScaling.png")

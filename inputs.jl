@@ -16,8 +16,8 @@ const inp = (
         domainHeight = 0.020, # [m]
 
         # Inflow parameters
-        Uinf   = 12.417664315415696,    # chordwise velocity [m/s]
-        Winf   = 20.3,                  # spanwise velocity [m/s]
+        Uinf   = 12.417927662146404,    # chordwise velocity [m/s]
+        Winf   = 20.59,                 # spanwise velocity [m/s]
         xInlet = 0.046694057793992,     # inlet position (distance from virtual LE) [m]
 
         # Top-boundary pressure polynomial (Casacuberta et al, 2022)
@@ -29,6 +29,10 @@ const inp = (
 
         # Fluid properties
         freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
+
+        # Grid resolution (multipliers on base cell counts)
+        gridXfactor = 2,   # streamwise: base is 154 cells (36+6+12+6+70+24)
+        gridYfactor = 2,   # wall-normal: base is 40 cells (30 bottom + 10 top)
 
         # Parallel
         nProcs = 8,
@@ -45,7 +49,7 @@ const inp = (
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
             freeStreamVelocityStreamwise  = 24.84840467482210,  # [m/s]
-            freeStreamVelocitySpanwise    = 20.3,               # [m/s]
+            freeStreamVelocitySpanwise    = 20.59,              # [m/s]
             freeStreamViscosity = 1.456610719354608e-5,         # [m^2/s]
         ),
 
@@ -64,8 +68,8 @@ const inp = (
             yCenter     = 0.0,      # [m]
 
             # Grid resolution
-            Nx = 210,
-            Ny = 60,
+            Nx = 800,
+            Ny = 240,
 
             # Turbulence
             turbulenceIntensity = 0.0003, # [-] (turbulenceIntensity = 0.0003 -> I = 0.03 %)
@@ -96,23 +100,17 @@ const inp = (
             cosineArch   = true,   # cosine clustering of stations near the LE
 
             # Grid resolution
-            NxTotal  = 1200,
-            NyBL     = 200,
+            NxTotal  = 800,
+            NyBL     = 400,
             gradBL   = 200.0,  # BL wall-normal expansion ratio (cell size grows toward outer edge)
             gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
             # Export / post-processing
             outputFormat = "csv",       # csv | binary
             exportMode   = "partial",   # full | partial
-            xiInlet      = 0.05,        # chord fraction for inlet boundary
+            xiInlet      = 0.02,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
             exportHeight = 0.020,       # wall-normal from surface [m]
-        ),
-
-        # ── Mapping (TunnelCase → AirfoilLECase) ───────────────────────
-        mapping = (
-            tunnelTime = "450",    # converged time step to sample from
-            zProbe     = 0.005,    # [m] for sampling
         ),
 
         # ── Parallel ────────────────────────────────────────────────────
@@ -130,6 +128,7 @@ const inp = (
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
         ),
         valPlot = true,   # true: overlay reference data on validation plots
+        Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
     ),
 
 )

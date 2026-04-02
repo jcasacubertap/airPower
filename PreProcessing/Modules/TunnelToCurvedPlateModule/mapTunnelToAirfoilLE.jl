@@ -41,8 +41,15 @@ end
 
 include(find_ancestor_file(@__DIR__, "inputs.jl"))
 
-const TUNNEL_TIME = inp.TTCP.mapping.tunnelTime
-const Z_PROBE     = inp.TTCP.mapping.zProbe
+# Auto-detect latest converged time directory in TunnelCase
+const TUNNEL_TIME = let
+    dirs = filter(d -> all(c -> isdigit(c) || c == '.', d) && d != "0",
+                  readdir(TUNNEL_CASE))
+    isempty(dirs) && error("No solved time directories found in $TUNNEL_CASE")
+    sort(dirs, by=s -> parse(Float64, s))[end]
+end
+
+const Z_PROBE = 0.005  # [m] spanwise sampling position
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  OpenFOAM mesh parsing
@@ -425,7 +432,7 @@ function update_boundary_conditions()
     p_path = joinpath(AIRFOIL_CASE, "0", "p")
     p_text = read(p_path, String)
 
-    # suctionOutlet: fixedValue → timeVaryingMappedFixedValue
+    # suctionOutlet: timeVaryingMappedFixedValue (mapped from TunnelCase)
     p_text = replace(p_text,
         r"suctionOutlet\s*\{[^}]*\}" =>
         """suctionOutlet

@@ -125,12 +125,6 @@ functions
                 }
             }
 
-            // ── Read flow parameters for Cp/Cf scaling ──
-            const scalar Uinf_ = d.lookupOrDefault<scalar>("freeStreamVelocityStreamwise", 25.0);
-            const scalar Winf_ = d.lookupOrDefault<scalar>("freeStreamVelocitySpanwise", 0.0);
-            const scalar Umag_ = std::sqrt(Uinf_*Uinf_ + Winf_*Winf_);
-            const scalar qInf  = 0.5 * Umag_ * Umag_;  // dynamic pressure (kinematic)
-
             // ── Final cell list (full or partial) ──
             DynamicList<label> cells;
             DynamicList<scalar> localWall;
@@ -323,14 +317,11 @@ functions
                     localWall.append(fx);
                     localWall.append(fy);
 
-                    // Wall quantities from OpenFOAM function objects
-                    double cp = pw[fi] / qInf;
-                    double cf = mag(wssPatch[fi]) / qInf;
-                    double yp = ypPatch[fi];
+                    // Wall quantities from OpenFOAM fields
                     localWallQ.append(fx);
-                    localWallQ.append(cp);
-                    localWallQ.append(cf);
-                    localWallQ.append(yp);
+                    localWallQ.append(pw[fi]);              // p/ρ [m²/s²]
+                    localWallQ.append(mag(wssPatch[fi]));   // |τ_w|/ρ [m²/s²]
+                    localWallQ.append(ypPatch[fi]);
                 }
 
                 Info<< "writeMidPlane: partial mode — "
@@ -472,7 +463,7 @@ functions
                 {
                     OFstream qos(outDir/"wallQuantities.csv");
                     qos.precision(10);
-                    qos << "x,Cp,Cf,yPlus" << nl;
+                    qos << "x,p,tau,yPlus" << nl;
 
                     forAll(allWallQ, proci)
                     {

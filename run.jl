@@ -25,7 +25,7 @@ include(joinpath(ROOT, "PreProcessing", "Scripts", "Auxiliary", "leastSquares.jl
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Auxiliary", "falknerSkan.jl"))
 
 # Plotting & validation (must come before modules that reference plot functions)
-using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings
+using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings, Statistics
 default(fontfamily = "Computer Modern")
 const PV_DIR = joinpath(ROOT, "PreProcessing", "Scripts", "PlottingAndValidation")
 include(joinpath(PV_DIR, "residuals.jl"))
@@ -33,7 +33,8 @@ include(joinpath(PV_DIR, "fields.jl"))
 include(joinpath(PV_DIR, "profiles.jl"))
 include(joinpath(PV_DIR, "wallgeometry.jl"))
 include(joinpath(PV_DIR, "wallquantities.jl"))
-include(joinpath(PV_DIR, "cpvalidation.jl"))
+include(joinpath(PV_DIR, "experimentalvalidation.jl"))
+include(joinpath(PV_DIR, "dfpvalidation.jl"))
 
 # External-to-scaling preprocessing
 include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "externalToScaling.jl"))

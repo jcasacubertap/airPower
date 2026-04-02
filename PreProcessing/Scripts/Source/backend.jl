@@ -117,6 +117,10 @@ Upinlet
 //Fluid properties
  freeStreamViscosity   $(p.freeStreamViscosity);
 
+//Grid resolution factors
+ gridXfactor   $(p.gridXfactor);
+ gridYfactor   $(p.gridYfactor);
+
 //Output settings
  outputFormat          $(p.outputFormat);
 }

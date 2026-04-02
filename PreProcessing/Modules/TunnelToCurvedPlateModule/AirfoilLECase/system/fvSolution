@@ -58,8 +58,8 @@ relaxationFactors
 {
     equations
     {
-        U               0.9; // 0.9 is more stable but 0.95 more convergent
-        ".*"            0.9; // 0.9 is more stable but 0.95 more convergent
+        U               0.9;
+        ".*"            0.9;
     }
 }
 
