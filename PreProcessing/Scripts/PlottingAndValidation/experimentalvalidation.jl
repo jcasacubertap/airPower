@@ -171,7 +171,7 @@ function plot_experimental_validation(case_path::AbstractString;
         wprof, dprof = extract_profile(x_of, y_of, w_of, st)
         if !isempty(wprof)
             plot!(p, wprof, dprof;
-                label="Numerical", color=:black, linewidth=2)
+                label="Solver", color=:black, linewidth=2)
         end
 
         # Experimental profile (symbols)
