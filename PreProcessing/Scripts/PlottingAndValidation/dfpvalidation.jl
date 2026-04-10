@@ -7,8 +7,8 @@ w-velocity profile validation for the DirectFlatPlate case.
 One subplot per experimental station (x/c), showing OpenFOAM w-profile (line)
 and PIV w_m z-averaged profile (symbols).
 
-Coordinate mapping: the domain starts at xInlet, so x_OpenFOAM = S (arc-length
-from virtual LE) directly. The x/c station maps to x_DFP via BL.S(BL.x).
+Coordinate mapping: the flat plate arc-length is S = xInlet + x_OpenFOAM.
+The x/c station maps to arc-length via BL.S(BL.x), then to x_DFP = S - xInlet.
 """
 function plot_dfp_w_validation(case_path::AbstractString;
                                savedir::AbstractString=case_path,
@@ -51,7 +51,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
     @info "Experimental stations (x/c): $stations"
 
     # ── Map x/c → x_DFP via BL.S(BL.x) ──
-    # Domain starts at xInlet, so x_OpenFOAM = S directly (no offset needed)
+    # Domain starts at x=0, physical arc-length S = xInlet + x_OpenFOAM
     function xc_to_xdfp(xi_c)
         x_chord = xi_c * c_ref
         # Interpolate S at this x_chord
@@ -59,7 +59,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
         idx = clamp(idx, 1, length(x_ref) - 1)
         t = (x_chord - x_ref[idx]) / (x_ref[idx+1] - x_ref[idx])
         S_at_xc = (1 - t) * S_ref[idx] + t * S_ref[idx+1]
-        return S_at_xc
+        return S_at_xc - xInlet
     end
 
     # ── Read OpenFOAM field data ──
@@ -167,15 +167,15 @@ function plot_dfp_w_validation(case_path::AbstractString;
             common...)
 
         # OpenFOAM profile
-        if xInlet < x_dfp < xInlet + domainLength
+        if 0 < x_dfp < domainLength
             wprof, yprof = extract_profile(x_of, y_of, w_of, x_dfp)
             if !isempty(wprof)
                 plot!(p, wprof, yprof;
                     label="Solver", color=:black, linewidth=2)
             end
         else
-            @warn @sprintf("  x/c=%.2f maps to x_DFP=%.4f — outside domain [%.3f, %.3f]",
-                           xi_c, x_dfp, xInlet, xInlet + domainLength)
+            @warn @sprintf("  x/c=%.2f maps to x_DFP=%.4f — outside domain [0, %.3f]",
+                           xi_c, x_dfp, domainLength)
         end
 
         # Experimental profile

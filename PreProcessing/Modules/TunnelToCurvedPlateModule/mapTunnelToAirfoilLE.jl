@@ -262,10 +262,12 @@ sets
         print(io, content)
     end
 
-    # Also write via Docker to bypass VirtioFS cache
-    container_path = docker_case_path(TUNNEL_CASE) * "/system/sampleDict"
-    open(`docker exec -i openfoam2412 bash -c "cat > $container_path"`, "w") do io
-        print(io, content)
+    # On macOS/Docker, also write via Docker to bypass VirtioFS cache
+    if Sys.isapple()
+        docker_path = _docker_case_path(TUNNEL_CASE) * "/system/sampleDict"
+        open(`docker exec -i openfoam2412 bash -c "cat > $docker_path"`, "w") do io
+            print(io, content)
+        end
     end
 
     println("  Written: $dict_path")
@@ -275,13 +277,7 @@ end
 #  Run OpenFOAM sampling
 # ═══════════════════════════════════════════════════════════════════════════════
 
-"""
-    docker_case_path(host_path)
-
-Convert a host path under ~/OpenFOAM/cases/ to the Docker mount point
-/home/openfoam/ used by the opencfd/openfoam-default container.
-"""
-function docker_case_path(host_path::String)
+function _docker_case_path(host_path::String)
     home = ENV["HOME"]
     prefix = joinpath(home, "OpenFOAM", "cases")
     if startswith(host_path, prefix)
@@ -291,13 +287,18 @@ function docker_case_path(host_path::String)
 end
 
 function run_sampling()
-    container_case = docker_case_path(TUNNEL_CASE)
-    foam_cmd = "postProcess -case $container_case -func sampleDict -time $TUNNEL_TIME"
-
-    println("  Running inside Docker container openfoam2412:")
-    println("    $foam_cmd")
-
-    run(`docker exec openfoam2412 bash -ic $foam_cmd`)
+    if Sys.isapple()
+        container_case = _docker_case_path(TUNNEL_CASE)
+        foam_cmd = "postProcess -case $container_case -func sampleDict -time $TUNNEL_TIME"
+        println("  Running inside Docker container openfoam2412:")
+        println("    $foam_cmd")
+        run(`docker exec openfoam2412 bash -ic $foam_cmd`)
+    else
+        foam_cmd = "source /usr/lib/openfoam/openfoam2412/etc/bashrc && " *
+                   "postProcess -case $TUNNEL_CASE -func sampleDict -time $TUNNEL_TIME"
+        println("  Running: postProcess -func sampleDict -time $TUNNEL_TIME")
+        run(`bash -c $foam_cmd`)
+    end
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════

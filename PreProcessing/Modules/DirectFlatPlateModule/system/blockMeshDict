@@ -22,19 +22,17 @@ convertToMeters 0.001;
 // Domain dimensions [m -> mm for convertToMeters 0.001]
 Lm   ${Upinlet.domainLength};
 Hm   ${Upinlet.domainHeight};
-x0m  ${Upinlet.xInlet};
 L    #calc "$Lm * 1000.0";
 H    #calc "$Hm * 1000.0";
-X0   #calc "$x0m * 1000.0";        // xInlet offset [mm]
 
-// Block x-positions (fixed proportions, offset by xInlet)
-x0   $X0;
-x1   #calc "$X0 + 3.0/13.0 * $L";
-x2   #calc "$X0 + 7.0/26.0 * $L";
-x3   #calc "$X0 + 9.0/26.0 * $L";
-x4   #calc "$X0 + 5.0/13.0 * $L";
-x5   #calc "$X0 + 11.0/13.0 * $L";
-x6   #calc "$X0 + $L";
+// Block x-positions (fixed proportions)
+x0   0;
+x1   #calc "3.0/13.0 * $L";
+x2   #calc "7.0/26.0 * $L";
+x3   #calc "9.0/26.0 * $L";
+x4   #calc "5.0/13.0 * $L";
+x5   #calc "11.0/13.0 * $L";
+x6   $L;
 
 // Block y-positions (50/50 split)
 y0   0;

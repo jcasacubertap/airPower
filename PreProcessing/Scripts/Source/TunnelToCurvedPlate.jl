@@ -41,12 +41,18 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             @info "  airfoil2stl: $(t.airfoilFile) → $(base).stl"
             run(`bash $airfoil2stl $dat_file $raw_stl $z_span`)
 
-            # Step 2: Orient normals (write to /tmp to avoid Docker mount write issues)
+            # Step 2: Orient normals
             @info "  surfaceOrient → $(base)_oriented.stl"
             outside_pt = "($( t.tunnelLength / 2 ) 0 0)"
-            foam_exec(backend, tunnel_case,
-                      "surfaceOrient constant/triSurface/$(base).stl '$(outside_pt)' /tmp/$(base)_oriented.stl" *
-                      " && cp /tmp/$(base)_oriented.stl constant/triSurface/$(base)_oriented.stl")
+            if backend == DOCKER
+                # VirtioFS workaround: write to /tmp, copy back
+                foam_exec(backend, tunnel_case,
+                          "surfaceOrient constant/triSurface/$(base).stl '$(outside_pt)' /tmp/$(base)_oriented.stl" *
+                          " && cp /tmp/$(base)_oriented.stl constant/triSurface/$(base)_oriented.stl")
+            else
+                foam_exec(backend, tunnel_case,
+                          "surfaceOrient constant/triSurface/$(base).stl '$(outside_pt)' constant/triSurface/$(base)_oriented.stl")
+            end
 
             # Step 3: Check surface
             @info "  surfaceCheck..."
@@ -62,15 +68,18 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             aoa = t.alphaDeg
 
             @info "  surfaceTransformPoints: chord=$(chord), alpha=$(aoa)°, center=($(t.xCenter),$(t.yCenter))"
-            foam_exec(backend, tunnel_case,
-                      "surfaceTransformPoints" *
+            stl_cmd = "surfaceTransformPoints" *
                       " -scale '($chord $chord 1)'" *
                       " -translate '($dx 0 $dy)'" *
                       " -origin '($xo 0 $yo)'" *
                       " -rollPitchYaw '(0 0 $(-aoa))'" *
-                      " constant/triSurface/$(base)_oriented.stl" *
-                      " /tmp/airfoil.stl" *
-                      " && cp /tmp/airfoil.stl constant/triSurface/airfoil.stl")
+                      " constant/triSurface/$(base)_oriented.stl"
+            if backend == DOCKER
+                foam_exec(backend, tunnel_case, stl_cmd *
+                          " /tmp/airfoil.stl && cp /tmp/airfoil.stl constant/triSurface/airfoil.stl")
+            else
+                foam_exec(backend, tunnel_case, stl_cmd * " constant/triSurface/airfoil.stl")
+            end
 
             # Step 5: Extract feature edges
             @info "  surfaceFeatureExtract..."
@@ -85,19 +94,22 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
         :meshTunnel => () -> begin
             write_tunnel_input_param(tunnel_case)
-
-            work = "/tmp/TunnelCase_mesh"
             @info "Meshing TunnelCase..."
-            foam_exec(backend, tunnel_case,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && blockMesh && snappyHexMesh")
-            # Copy mesh back via docker cp
-            tc_docker = docker_case_path(tunnel_case)
-            for d in ["constant/polyMesh", "constant/triSurface", "constant/extendedFeatureEdgeMesh", "1", "2"]
-                run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
-                    "[ -d $work/$d ] && rm -rf $tc_docker/$d && cp -r $work/$d $tc_docker/$d"`))
+            if backend == DOCKER
+                work = "/tmp/TunnelCase_mesh"
+                foam_exec(backend, tunnel_case,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && blockMesh && snappyHexMesh")
+                tc_docker = docker_case_path(tunnel_case)
+                for d in ["constant/polyMesh", "constant/triSurface", "constant/extendedFeatureEdgeMesh", "1", "2"]
+                    run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
+                        "[ -d $work/$d ] && rm -rf $tc_docker/$d && cp -r $work/$d $tc_docker/$d"`))
+                end
+                foam_exec(backend, tunnel_case, "rm -rf $work")
+            else
+                foam_exec(backend, tunnel_case, "blockMesh")
+                foam_exec(backend, tunnel_case, "snappyHexMesh")
             end
-            foam_exec(backend, tunnel_case, "rm -rf $work")
             @info "Meshing complete"
         end,
 
@@ -106,35 +118,39 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
             @info "Generating AirfoilLECase grid..."
             run_julia_subprocess(generate_grid; dir=airfoil_case)
-            # Push blockMeshDict into Docker (VirtioFS truncates large files)
-            bmd = joinpath(airfoil_case, "system", "blockMeshDict")
-            run(`docker cp $bmd $(DOCKER_CONTAINER):$(docker_case_path(airfoil_case))/system/blockMeshDict`)
+            if backend == DOCKER
+                # Push blockMeshDict into Docker (VirtioFS truncates large files)
+                bmd = joinpath(airfoil_case, "system", "blockMeshDict")
+                run(`docker cp $bmd $(DOCKER_CONTAINER):$(docker_case_path(airfoil_case))/system/blockMeshDict`)
+            end
             @info "Meshing AirfoilLECase..."
             foam_exec(backend, airfoil_case, "blockMesh")
         end,
 
         :runTunnel => () -> begin
             write_tunnel_input_param(tunnel_case)
-
             @info "Solving TunnelCase..."
-            work = "/tmp/TunnelCase_run"
-            np = inp.TTCP.nProcs
-            foam_exec(backend, tunnel_case,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && cp -r 2 2.bak" *
-                " && cp 0/U 0/p 0/k 0/omega 0/nut 2/" *
-                " && decomposePar -force -time 2" *
-                " && mpirun -np $np --oversubscribe simpleFoam -parallel" *
-                " && reconstructPar" *
-                " && rm -r 2 && mv 2.bak 2")
-            # Copy reconstructed time directory back via docker cp
-            latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
-                "ls -1d $work/[0-9]* 2>/dev/null | grep -v '^$work/0\$' | grep -v '^$work/2\$' | sort -g | tail -1"`, String) |> strip
-            if !isempty(latest)
-                run(`docker cp $(DOCKER_CONTAINER):$latest $(tunnel_case)/`)
-                @info "Copied time directory: $(basename(latest))"
+            if backend == DOCKER
+                work = "/tmp/TunnelCase_run"
+                np = inp.TTCP.nProcs
+                foam_exec(backend, tunnel_case,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && cp -r 2 2.bak" *
+                    " && cp 0/U 0/p 0/k 0/omega 0/nut 2/" *
+                    " && decomposePar -force -time 2" *
+                    " && mpirun -np $np --oversubscribe simpleFoam -parallel" *
+                    " && reconstructPar" *
+                    " && rm -r 2 && mv 2.bak 2")
+                latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "ls -1d $work/[0-9]* 2>/dev/null | grep -v '^$work/0\$' | grep -v '^$work/2\$' | sort -g | tail -1"`, String) |> strip
+                if !isempty(latest)
+                    run(`docker cp $(DOCKER_CONTAINER):$latest $(tunnel_case)/`)
+                    @info "Copied time directory: $(basename(latest))"
+                end
+                foam_exec(backend, tunnel_case, "rm -rf $work")
+            else
+                foam_script(backend, tunnel_case, "run", "$(inp.TTCP.nProcs)")
             end
-            foam_exec(backend, tunnel_case, "rm -rf $work")
         end,
 
         :map => () -> begin
@@ -144,39 +160,43 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
         :runAirfoil => () -> begin
             write_airfoil_le_input_param(airfoil_case)
-
-            # Solve in /tmp to work around Docker VirtioFS OFstream issue
             @info "Solving AirfoilLECase..."
-            work = "/tmp/AirfoilLECase_run"
-            foam_exec(backend, airfoil_case,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && decomposePar -force" *
-                " && mpirun -np $(inp.TTCP.nProcs) --oversubscribe simpleFoam -parallel" *
-                " && reconstructPar")
-            # Copy reconstructed time directory back via docker cp
-            latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
-                "ls -1d $work/[0-9]* 2>/dev/null | sort -g | tail -1"`, String) |> strip
-            if !isempty(latest) && basename(latest) != "0"
-                run(`docker cp $(DOCKER_CONTAINER):$latest $(airfoil_case)/`)
-                @info "Copied time directory: $(basename(latest))"
+            if backend == DOCKER
+                work = "/tmp/AirfoilLECase_run"
+                foam_exec(backend, airfoil_case,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && decomposePar -force" *
+                    " && mpirun -np $(inp.TTCP.nProcs) --oversubscribe simpleFoam -parallel" *
+                    " && reconstructPar")
+                latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "ls -1d $work/[0-9]* 2>/dev/null | sort -g | tail -1"`, String) |> strip
+                if !isempty(latest) && basename(latest) != "0"
+                    run(`docker cp $(DOCKER_CONTAINER):$latest $(airfoil_case)/`)
+                    @info "Copied time directory: $(basename(latest))"
+                end
+                foam_exec(backend, airfoil_case, "rm -rf $work")
+            else
+                foam_script(backend, airfoil_case, "run", "$(inp.TTCP.nProcs)")
             end
-            foam_exec(backend, airfoil_case, "rm -rf $work")
         end,
 
         :postAirfoil => () -> begin
             @info "Post-processing AirfoilLECase..."
-            work = "/tmp/AirfoilLECase_post"
-            # Run postProcess in /tmp (VirtioFS workaround)
-            foam_exec(backend, airfoil_case,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && rm -rf dynamicCode postProcessing" *
-                " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
-            # Copy results back via docker cp (bypasses VirtioFS mount issues)
-            pp_dest = joinpath(airfoil_case, "postProcessing")
-            rm(pp_dest; force=true, recursive=true)
-            run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
-            # Clean up
-            foam_exec(backend, airfoil_case, "rm -rf $work")
+            if backend == DOCKER
+                work = "/tmp/AirfoilLECase_post"
+                foam_exec(backend, airfoil_case,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && rm -rf dynamicCode postProcessing" *
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
+                pp_dest = joinpath(airfoil_case, "postProcessing")
+                rm(pp_dest; force=true, recursive=true)
+                run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
+                foam_exec(backend, airfoil_case, "rm -rf $work")
+            else
+                foam_exec(backend, airfoil_case,
+                    "rm -rf dynamicCode postProcessing" *
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
+            end
             @info "Post-processing complete"
         end,
 
@@ -209,41 +229,47 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :monitorTunnel => () -> begin
-            tmp_dir = mktempdir()
-            dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
-            mkpath(dst)
-            # Parallel runs write solverInfo_0.dat; serial writes solverInfo.dat
-            for f in ["solverInfo_0.dat", "solverInfo.dat"]
-                src = "/tmp/TunnelCase_run/postProcessing/solverInfo/0/$f"
-                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+            if backend == DOCKER
+                tmp_dir = mktempdir()
+                dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
+                mkpath(dst)
+                for f in ["solverInfo_0.dat", "solverInfo.dat"]
+                    src = "/tmp/TunnelCase_run/postProcessing/solverInfo/0/$f"
+                    run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+                end
+                f0 = joinpath(dst, "solverInfo_0.dat")
+                fd = joinpath(dst, "solverInfo.dat")
+                if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
+                    cp(f0, fd; force=true)
+                end
+                p = plot_residuals(tmp_dir; savedir=tmp_dir, label="TunnelCase (live)")
+                rm(tmp_dir; force=true, recursive=true)
+            else
+                p = plot_residuals(tunnel_case; savedir=mktempdir(), label="TunnelCase (live)")
             end
-            # Rename _0 to plain if needed (plot_residuals expects solverInfo.dat)
-            f0 = joinpath(dst, "solverInfo_0.dat")
-            fd = joinpath(dst, "solverInfo.dat")
-            if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
-                cp(f0, fd; force=true)
-            end
-            p = plot_residuals(tmp_dir; savedir=tmp_dir, label="TunnelCase (live)")
-            rm(tmp_dir; force=true, recursive=true)
             display(p)
             return p
         end,
 
         :monitorAirfoil => () -> begin
-            tmp_dir = mktempdir()
-            dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
-            mkpath(dst)
-            for f in ["solverInfo_0.dat", "solverInfo.dat"]
-                src = "/tmp/AirfoilLECase_run/postProcessing/solverInfo/0/$f"
-                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+            if backend == DOCKER
+                tmp_dir = mktempdir()
+                dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
+                mkpath(dst)
+                for f in ["solverInfo_0.dat", "solverInfo.dat"]
+                    src = "/tmp/AirfoilLECase_run/postProcessing/solverInfo/0/$f"
+                    run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$src $dst/`))
+                end
+                f0 = joinpath(dst, "solverInfo_0.dat")
+                fd = joinpath(dst, "solverInfo.dat")
+                if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
+                    cp(f0, fd; force=true)
+                end
+                p = plot_residuals(tmp_dir; savedir=tmp_dir, label="AirfoilLECase (live)")
+                rm(tmp_dir; force=true, recursive=true)
+            else
+                p = plot_residuals(airfoil_case; savedir=mktempdir(), label="AirfoilLECase (live)")
             end
-            f0 = joinpath(dst, "solverInfo_0.dat")
-            fd = joinpath(dst, "solverInfo.dat")
-            if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
-                cp(f0, fd; force=true)
-            end
-            p = plot_residuals(tmp_dir; savedir=tmp_dir, label="AirfoilLECase (live)")
-            rm(tmp_dir; force=true, recursive=true)
             display(p)
             return p
         end,

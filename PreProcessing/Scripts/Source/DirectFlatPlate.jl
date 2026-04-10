@@ -45,53 +45,65 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
 
         :mesh  => () -> begin
             write_flat_plate_input_param(case_dir)
-            work = "/tmp/DFP_mesh"
             @info "Meshing DirectFlatPlate..."
-            foam_exec(backend, case_dir,
-                "rm -rf $work && cp -r . $work && cd $work && blockMesh")
-            dfp_docker = docker_case_path(case_dir)
-            run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
-                "rm -rf $dfp_docker/constant/polyMesh && cp -r $work/constant/polyMesh $dfp_docker/constant/polyMesh"`))
-            foam_exec(backend, case_dir, "rm -rf $work")
+            if backend == DOCKER
+                work = "/tmp/DFP_mesh"
+                foam_exec(backend, case_dir,
+                    "rm -rf $work && cp -r . $work && cd $work && blockMesh")
+                dfp_docker = docker_case_path(case_dir)
+                run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "rm -rf $dfp_docker/constant/polyMesh && cp -r $work/constant/polyMesh $dfp_docker/constant/polyMesh"`))
+                foam_exec(backend, case_dir, "rm -rf $work")
+            else
+                foam_exec(backend, case_dir, "blockMesh")
+            end
         end,
 
         :run => () -> begin
             write_flat_plate_input_param(case_dir)
             @info "Solving DirectFlatPlate..."
-            work = "/tmp/DFP_run"
-            np = inp.DFP.nProcs
-            foam_exec(backend, case_dir,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && decomposePar" *
-                " && mpirun -np $np --oversubscribe simpleFoam -parallel" *
-                " && reconstructPar" *
-                " && for f in FSC_inletData.dat FSC_inletProfile.dat; do" *
-                "   [ -f processor0/\$f ] && cp processor0/\$f .; done")
-            # Copy results back via docker cp
-            latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
-                "ls -1d $work/[0-9]* 2>/dev/null | grep -v '/0\$' | sort -g | tail -1"`, String) |> strip
-            if !isempty(latest)
-                run(`docker cp $(DOCKER_CONTAINER):$latest $(case_dir)/`)
-                @info "Copied time directory: $(basename(latest))"
+            if backend == DOCKER
+                work = "/tmp/DFP_run"
+                np = inp.DFP.nProcs
+                foam_exec(backend, case_dir,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && decomposePar" *
+                    " && mpirun -np $np --oversubscribe simpleFoam -parallel" *
+                    " && reconstructPar" *
+                    " && for f in FSC_inletData.dat FSC_inletProfile.dat; do" *
+                    "   [ -f processor0/\$f ] && cp processor0/\$f .; done")
+                latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "ls -1d $work/[0-9]* 2>/dev/null | grep -v '/0\$' | sort -g | tail -1"`, String) |> strip
+                if !isempty(latest)
+                    run(`docker cp $(DOCKER_CONTAINER):$latest $(case_dir)/`)
+                    @info "Copied time directory: $(basename(latest))"
+                end
+                for f in ["FSC_inletData.dat", "FSC_inletProfile.dat"]
+                    run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$work/$f $(case_dir)/`))
+                end
+                foam_exec(backend, case_dir, "rm -rf $work")
+            else
+                foam_script(backend, case_dir, "run", "$(inp.DFP.nProcs)")
             end
-            # Copy FSC inlet data files
-            for f in ["FSC_inletData.dat", "FSC_inletProfile.dat"]
-                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$work/$f $(case_dir)/`))
-            end
-            foam_exec(backend, case_dir, "rm -rf $work")
         end,
 
         :post => () -> begin
             @info "Post-processing DirectFlatPlate..."
-            work = "/tmp/DFP_post"
-            foam_exec(backend, case_dir,
-                "rm -rf $work && cp -r . $work && cd $work" *
-                " && rm -rf dynamicCode postProcessing" *
-                " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | grep -v '^0\$' | sort -g | tail -1)\"")
-            pp_dest = joinpath(case_dir, "postProcessing")
-            rm(pp_dest; force=true, recursive=true)
-            run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
-            foam_exec(backend, case_dir, "rm -rf $work")
+            if backend == DOCKER
+                work = "/tmp/DFP_post"
+                foam_exec(backend, case_dir,
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && rm -rf dynamicCode postProcessing" *
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | grep -v '^0\$' | sort -g | tail -1)\"")
+                pp_dest = joinpath(case_dir, "postProcessing")
+                rm(pp_dest; force=true, recursive=true)
+                run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
+                foam_exec(backend, case_dir, "rm -rf $work")
+            else
+                foam_exec(backend, case_dir,
+                    "rm -rf dynamicCode postProcessing" *
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | grep -v '^0\$' | sort -g | tail -1)\"")
+            end
         end,
 
         :viz => () -> begin
