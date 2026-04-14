@@ -240,8 +240,11 @@ function plot_fields(case_path::AbstractString;
             for (k, st) in enumerate(prof_stations)
                 fprof, dprof = extract_profile(x, y, fv, st)
                 isempty(fprof) && continue
+                c = colors[mod1(k, length(colors))]
                 plot!(p_pr, fprof, dprof;
-                      label=station_label(st), color=colors[mod1(k, length(colors))])
+                      label=station_label(st), color=c,
+                      marker=:circle, markersize=3, markercolor=c,
+                      markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
             fig = plot(p_cont, p_pr;
@@ -254,13 +257,7 @@ function plot_fields(case_path::AbstractString;
         fig_u = make_velocity_figure(u, "u", L"u \ \mathrm{[m/s]}", "uField")
         fig_v = make_velocity_figure(v, "v", L"v \ \mathrm{[m/s]}", "vField")
         fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
-
-        p_pres = scatter(x, y;
-            marker_z       = p,
-            colorbar_title = L"p \ \mathrm{[Pa]}",
-            color          = :viridis,
-            size           = (950, 420),
-            common_sc...)
+        p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
     else
         make_velocity_figure = (fv_mat, comp_label, comp_latex, outname) -> begin
             p_cont = heatmap(xu, yu, fv_mat;
@@ -276,8 +273,11 @@ function plot_fields(case_path::AbstractString;
                 ylims=prof_ylims, legend=:outerright, common_prof...)
             for (k, si) in enumerate(prof_stations_idx)
                 profile = fv_mat[:, si]
+                c = colors[mod1(k, length(colors))]
                 plot!(p_pr, profile, yu;
-                      label=station_label(si), color=colors[mod1(k, length(colors))])
+                      label=station_label(si), color=c,
+                      marker=:circle, markersize=3, markercolor=c,
+                      markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
             fig = plot(p_cont, p_pr;
@@ -290,16 +290,8 @@ function plot_fields(case_path::AbstractString;
         fig_u = make_velocity_figure(F_u_s, "u", L"u \ \mathrm{[m/s]}", "uField")
         fig_v = make_velocity_figure(F_v_s, "v", L"v \ \mathrm{[m/s]}", "vField")
         fig_w = make_velocity_figure(F_w_s, "w", L"w \ \mathrm{[m/s]}", "wField")
-
-        p_pres = heatmap(xu, yu, F_p_s;
-            colorbar_title = L"p \ \mathrm{[Pa]}",
-            color          = :viridis,
-            size           = (950, 420),
-            common_hm...)
+        p_pres = make_velocity_figure(F_p_s, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
     end
-    outfile_p = joinpath(savedir, "pressure$(label).png")
-    savefig(p_pres, outfile_p)
-    @info "Saved: $outfile_p"
 
     return (fig_u, fig_v, fig_w, p_pres)
 end

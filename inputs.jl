@@ -38,7 +38,8 @@ const inp = (
         nProcs = 8,
 
         # Output settings
-        outputFormat = "csv",   # csv | binary
+        outputFormat = "csv",           # csv | binary
+        wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
     # ======================================================================
@@ -111,6 +112,7 @@ const inp = (
             xiInlet      = 0.02,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
             exportHeight = 0.020,       # wall-normal from surface [m]
+            wallExtrapolation = true,   # add wall point (u=v=w=0, p extrapolated) to output
         ),
 
         # ── Parallel ────────────────────────────────────────────────────

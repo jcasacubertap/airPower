@@ -110,6 +110,7 @@ functions
             const dictionary& d = inputParam.subDict("Upinlet");
             const word fmt      = d.lookupOrDefault<word>("outputFormat", "csv");
             const word mode     = d.lookupOrDefault<word>("exportMode", "full");
+            const bool wallExtrap = d.lookupOrDefault<bool>("wallExtrapolation", false);
 
             // ── Mid-plane cell selection ──
             // nz=2, zWidth=2mm → cell center at z=0.0005 m
@@ -129,6 +130,7 @@ functions
             DynamicList<label> cells;
             DynamicList<scalar> localWall;
             DynamicList<scalar> localWallQ;  // wall quantities: x, p, cf, yplus per face
+            DynamicList<scalar> localWallExtrap;  // wall extrap: x,y,z,0,0,0,p per face
 
             if (mode == "partial")
             {
@@ -324,6 +326,76 @@ functions
                     localWallQ.append(ypPatch[fi]);
                 }
 
+                // ── Wall extrapolation: add wall face centres with u=v=w=0 ──
+                // p is extrapolated from the two nearest interior cells (2nd order)
+                if (wallExtrap)
+                {
+                    forAll(faceCentres, fi)
+                    {
+                        if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+
+                        double fx = faceCentres[fi].x();
+                        double fy = faceCentres[fi].y();
+
+                        double dotIn = (fx - pInX)*tInX + (fy - pInY)*tInY;
+                        if (dotIn < 0) continue;
+                        double dotOut = (fx - pOutX)*tOutX + (fy - pOutY)*tOutY;
+                        if (dotOut > 0) continue;
+                        if (-faceNormals[fi].y() < 0) continue;
+
+                        // Wall-normal direction (outward from airfoil)
+                        vector nOut = -faceNormals[fi];
+                        double nmag = mag(nOut);
+                        if (nmag < SMALL) continue;
+                        nOut /= nmag;
+
+                        // Find two nearest mid-plane cells along wall-normal
+                        scalar d1 = GREAT, d2 = GREAT;
+                        label c1 = -1, c2 = -1;
+                        forAll(cells, ci_idx)
+                        {
+                            label ci = cells[ci_idx];
+                            vector toC = C[ci] - faceCentres[fi];
+                            scalar dn = toC & nOut;  // wall-normal distance
+                            scalar dt = mag(toC - dn * nOut);  // tangential distance
+                            if (dn > 0 && dt < 0.003)  // above wall, within 3mm tangentially
+                            {
+                                if (dn < d1)
+                                {
+                                    d2 = d1; c2 = c1;
+                                    d1 = dn; c1 = ci;
+                                }
+                                else if (dn < d2)
+                                {
+                                    d2 = dn; c2 = ci;
+                                }
+                            }
+                        }
+
+                        double pWall = 0.0;
+                        if (c1 >= 0 && c2 >= 0 && d2 > d1 + SMALL)
+                        {
+                            // 2nd-order: linear extrapolation to dn=0
+                            pWall = p[c1] + (p[c2] - p[c1]) * (0.0 - d1) / (d2 - d1);
+                        }
+                        else if (c1 >= 0)
+                        {
+                            pWall = p[c1];
+                        }
+
+                        localWallExtrap.append(fx);
+                        localWallExtrap.append(fy);
+                        localWallExtrap.append(faceCentres[fi].z());
+                        localWallExtrap.append(0.0);  // u
+                        localWallExtrap.append(0.0);  // v
+                        localWallExtrap.append(0.0);  // w
+                        localWallExtrap.append(pWall);
+                    }
+
+                    Info<< "writeMidPlane: wall extrapolation — "
+                        << localWallExtrap.size()/7 << " wall faces added" << endl;
+                }
+
                 Info<< "writeMidPlane: partial mode — "
                     << "xiInlet=" << xiInlet_ << " xiOutlet=" << xiOutlet_
                     << " exportHeight=" << expHeight << " mm"
@@ -363,6 +435,11 @@ functions
             allWallQ[Pstream::myProcNo()] = localWallQ;
             Pstream::gatherList(allWallQ);
 
+            // Wall extrapolation data (empty unless partial+wallExtrap mode)
+            List<List<scalar>> allWallExtrap(Pstream::nProcs());
+            allWallExtrap[Pstream::myProcNo()] = localWallExtrap;
+            Pstream::gatherList(allWallExtrap);
+
             // ── Write output (master only) ──
             if (Pstream::master())
             {
@@ -370,12 +447,18 @@ functions
                     mesh.time().globalPath()/"postProcessing";
                 mkDir(outDir);
 
-                // Count total rows
+                // Count total rows (interior cells + wall extrapolation points)
                 label totalRows = 0;
                 forAll(allData, proci)
                 {
                     totalRows += allData[proci].size() / 7;
                 }
+                label nWallExtrap = 0;
+                forAll(allWallExtrap, proci)
+                {
+                    nWallExtrap += allWallExtrap[proci].size() / 7;
+                }
+                totalRows += nWallExtrap;
 
                 if (fmt == "binary")
                 {
@@ -387,6 +470,7 @@ functions
                     ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
                     ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
 
+                    // Interior cells
                     forAll(allData, proci)
                     {
                         const List<scalar>& pd = allData[proci];
@@ -397,9 +481,20 @@ functions
                             ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
                         }
                     }
+                    // Wall extrapolation points
+                    forAll(allWallExtrap, proci)
+                    {
+                        const List<scalar>& we = allWallExtrap[proci];
+                        for (label i = 0; i < we.size(); i += 7)
+                        {
+                            double row[7];
+                            for (int j = 0; j < 7; ++j) row[j] = we[i+j];
+                            ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
+                        }
+                    }
 
-                    Info<< "writeMidPlane: wrote " << nRows
-                        << " cells (binary) to " << fpath << endl;
+                    Info<< "writeMidPlane: wrote " << totalRows
+                        << " rows (binary) to " << fpath << endl;
                 }
                 else
                 {
@@ -407,6 +502,7 @@ functions
                     os.precision(10);
                     os << "x,y,z,u,v,w,p" << nl;
 
+                    // Interior cells
                     forAll(allData, proci)
                     {
                         const List<scalar>& pd = allData[proci];
@@ -421,9 +517,24 @@ functions
                                 << pd[i+6] << nl;
                         }
                     }
+                    // Wall extrapolation points
+                    forAll(allWallExtrap, proci)
+                    {
+                        const List<scalar>& we = allWallExtrap[proci];
+                        for (label i = 0; i < we.size(); i += 7)
+                        {
+                            os  << we[i]   << ","
+                                << we[i+1] << ","
+                                << we[i+2] << ","
+                                << we[i+3] << ","
+                                << we[i+4] << ","
+                                << we[i+5] << ","
+                                << we[i+6] << nl;
+                        }
+                    }
 
                     Info<< "writeMidPlane: wrote " << totalRows
-                        << " cells (csv) to " << os.name() << endl;
+                        << " rows (csv) to " << os.name() << endl;
                 }
 
                 // ── Write wall coordinates ──

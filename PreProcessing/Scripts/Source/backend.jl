@@ -123,6 +123,7 @@ Upinlet
 
 //Output settings
  outputFormat          $(p.outputFormat);
+ wallExtrapolation     $(p.wallExtrapolation ? "true" : "false");
 }
 
 // ************************************************************************* //""")
@@ -287,6 +288,7 @@ Upinlet
 
 //Output settings
  outputFormat          $(a.outputFormat);      // csv | binary
+ wallExtrapolation     $(a.wallExtrapolation ? "true" : "false");
 
 //Export region settings
  exportMode            $(a.exportMode);  // full | partial

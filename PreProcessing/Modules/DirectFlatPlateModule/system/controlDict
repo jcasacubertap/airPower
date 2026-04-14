@@ -97,6 +97,7 @@ functions
             );
             const dictionary& d = inputParam.subDict("Upinlet");
             const word fmt = d.lookupOrDefault<word>("outputFormat", "csv");
+            const bool wallExtrap = d.lookupOrDefault<bool>("wallExtrapolation", false);
 
             const scalar zTarget = 0.0;
             const scalar zTol    = 1e-3;
@@ -111,22 +112,87 @@ functions
                 }
             }
 
+            // ── Wall extrapolation: add wall face centres with u=v=w=0 ──
+            // p is extrapolated from the two nearest interior cells (2nd order)
+            DynamicList<label> wallFaces;
+            scalarField wallP;
+            if (wallExtrap)
+            {
+                label patchID = mesh.boundaryMesh().findPatchID("plate");
+                if (patchID >= 0)
+                {
+                    const polyPatch& pp = mesh.boundaryMesh()[patchID];
+                    const vectorField faceCentres(pp.faceCentres());  // copy to avoid dangling ref
+
+                    // For 2nd-order extrapolation, find the two nearest
+                    // mid-plane cells to each wall face (sorted by distance)
+                    forAll(faceCentres, fi)
+                    {
+                        if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+
+                        // Find two closest mid-plane cells by wall-normal distance
+                        scalar d1 = GREAT, d2 = GREAT;
+                        label c1 = -1, c2 = -1;
+                        double fx = faceCentres[fi].x();
+
+                        forAll(cells, ci_idx)
+                        {
+                            label ci = cells[ci_idx];
+                            // Same x-column: within half a cell width
+                            if (mag(C[ci].x() - fx) > 2e-3) continue;
+                            scalar dist = C[ci].y();  // wall-normal = y for flat plate
+                            if (dist < d1)
+                            {
+                                d2 = d1; c2 = c1;
+                                d1 = dist; c1 = ci;
+                            }
+                            else if (dist < d2)
+                            {
+                                d2 = dist; c2 = ci;
+                            }
+                        }
+
+                        wallFaces.append(fi);
+                        if (c1 >= 0 && c2 >= 0 && d2 > d1 + SMALL)
+                        {
+                            // 2nd-order: linear extrapolation to y=0
+                            scalar y1 = C[c1].y(), y2 = C[c2].y();
+                            scalar p1 = p[c1],     p2 = p[c2];
+                            scalar pWall = p1 + (p2 - p1) * (0.0 - y1) / (y2 - y1);
+                            wallP.append(pWall);
+                        }
+                        else if (c1 >= 0)
+                        {
+                            wallP.append(p[c1]);  // 1st order fallback
+                        }
+                        else
+                        {
+                            wallP.append(0.0);
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wall extrapolation — "
+                        << wallFaces.size() << " wall faces added" << endl;
+                }
+            }
+
             const fileName outDir =
                 mesh.time().globalPath()/"postProcessing";
             mkDir(outDir);
+
+            label totalRows = cells.size() + wallFaces.size();
 
             if (fmt == "binary")
             {
                 const fileName fpath = outDir/"midPlane.bin";
                 std::ofstream ofs(fpath, std::ios::binary);
 
-                // Header: 7 columns, number of rows
                 int32_t nCols = 7;
-                int64_t nRows = cells.size();
+                int64_t nRows = totalRows;
                 ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
                 ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
 
-                // Data: x,y,z,u,v,w,p as doubles per row
+                // Interior cells
                 forAll(cells, i)
                 {
                     const label ci = cells[i];
@@ -139,8 +205,26 @@ functions
                     ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
                 }
 
-                Info<< "writeMidPlane: wrote " << nRows
-                    << " cells (binary) to " << fpath << endl;
+                // Wall points (u=v=w=0, p extrapolated)
+                if (wallExtrap)
+                {
+                    label patchID = mesh.boundaryMesh().findPatchID("plate");
+                    const vectorField fc(mesh.boundaryMesh()[patchID].faceCentres());
+                    forAll(wallFaces, i)
+                    {
+                        label fi = wallFaces[i];
+                        double row[7] =
+                        {
+                            fc[fi].x(), fc[fi].y(), fc[fi].z(),
+                            0.0, 0.0, 0.0,
+                            wallP[i]
+                        };
+                        ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
+                    }
+                }
+
+                Info<< "writeMidPlane: wrote " << totalRows
+                    << " rows (binary) to " << fpath << endl;
             }
             else
             {
@@ -148,6 +232,7 @@ functions
                 os.precision(10);
                 os << "x,y,z,u,v,w,p" << nl;
 
+                // Interior cells
                 forAll(cells, i)
                 {
                     const label ci = cells[i];
@@ -160,8 +245,26 @@ functions
                         << p[ci] << nl;
                 }
 
-                Info<< "writeMidPlane: wrote " << cells.size()
-                    << " cells (csv) to " << os.name() << endl;
+                // Wall points (u=v=w=0, p extrapolated)
+                if (wallExtrap)
+                {
+                    label patchID = mesh.boundaryMesh().findPatchID("plate");
+                    const vectorField fc(mesh.boundaryMesh()[patchID].faceCentres());
+                    forAll(wallFaces, i)
+                    {
+                        label fi = wallFaces[i];
+                        os  << fc[fi].x() << ","
+                            << fc[fi].y() << ","
+                            << fc[fi].z() << ","
+                            << 0.0 << ","
+                            << 0.0 << ","
+                            << 0.0 << ","
+                            << wallP[i] << nl;
+                    }
+                }
+
+                Info<< "writeMidPlane: wrote " << totalRows
+                    << " rows (csv) to " << os.name() << endl;
             }
         #};
     }

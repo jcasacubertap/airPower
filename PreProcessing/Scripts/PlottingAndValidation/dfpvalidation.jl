@@ -171,7 +171,9 @@ function plot_dfp_w_validation(case_path::AbstractString;
             wprof, yprof = extract_profile(x_of, y_of, w_of, x_dfp)
             if !isempty(wprof)
                 plot!(p, wprof, yprof;
-                    label="Solver", color=:black, linewidth=2)
+                    label="Solver", color=:black, linewidth=2,
+                    marker=:circle, markersize=3, markercolor=:black,
+                    markerstrokecolor=:black, markerstrokewidth=0.5)
             end
         else
             @warn @sprintf("  x/c=%.2f maps to x_DFP=%.4f — outside domain [0, %.3f]",
