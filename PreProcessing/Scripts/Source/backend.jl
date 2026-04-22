@@ -1,3 +1,5 @@
+using Printf
+
 @enum BackendType DOCKER NATIVE
 
 """
@@ -67,6 +69,32 @@ function foam_script(backend::BackendType, case_path::AbstractString, script::Ab
     foam_exec(backend, case_path, cmd; verbose)
 end
 
+# ── Wall modulation (smooth bump/depression) ─────────────────────────
+
+"""
+    _smoothstep(t, n)
+
+Generalized smoothstep: S(0)=0, S(1)=1, S'(0)=S'(1)=0 for n≥2.
+"""
+_smoothstep(t, n) = t^n / (t^n + (1 - t)^n)
+
+"""
+    wall_bump(x; A, xStart, xPeak, xEnd, p, q)
+
+Evaluate the wall modulation height at position x.
+Uses piecewise sigmoidal smoothstep for C2 continuity (p,q ≥ 3).
+"""
+function wall_bump(x; A, xStart, xPeak, xEnd, p, q)
+    (x <= xStart || x >= xEnd) && return 0.0
+    if x <= xPeak
+        t = (x - xStart) / (xPeak - xStart)
+        return A * _smoothstep(t, p)
+    else
+        s = (x - xPeak) / (xEnd - xPeak)
+        return A * (1.0 - _smoothstep(s, q))
+    end
+end
+
 """
     write_flat_plate_input_param(case_dir)
 
@@ -75,6 +103,19 @@ Julia inputs.  The file is auto-generated and should not be edited by hand.
 """
 function write_flat_plate_input_param(case_dir::AbstractString)
     p = inp.DFP
+    wm = p.wallModulation
+
+    # Compute wall vertex y-displacements [mm] at the 7 block boundaries
+    L = p.domainLength
+    xverts = [0.0, 3.0/13.0*L, 7.0/26.0*L, 9.0/26.0*L, 5.0/13.0*L, 11.0/13.0*L, L]
+    if wm.enabled && wm.mode == :single
+        yverts = [wall_bump(xv; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak,
+                            xEnd=wm.xEnd, p=wm.p, q=wm.q) * 1000.0  # m → mm
+                  for xv in xverts]
+    else
+        yverts = zeros(7)
+    end
+
     path = joinpath(case_dir, "constant", "inputParam")
     mkpath(dirname(path))
     open(path, "w") do io
@@ -126,9 +167,182 @@ Upinlet
  wallExtrapolation     $(p.wallExtrapolation ? "true" : "false");
 }
 
+//Wall modulation — vertex y-displacements [mm] at each block boundary
+wallMod
+{
+ enabled  $(wm.enabled ? "true" : "false");
+ y0       $(yverts[1]);
+ y1       $(yverts[2]);
+ y2       $(yverts[3]);
+ y3       $(yverts[4]);
+ y4       $(yverts[5]);
+ y5       $(yverts[6]);
+ y6       $(yverts[7]);
+}
+
 // ************************************************************************* //""")
     end
     @info "Generated constant/inputParam" case=basename(case_dir)
+
+    # ── Write wall polyLine edges (system/wallEdges) ──
+    edges_path = joinpath(case_dir, "constant", "wallEdges")
+    N_KNOTS = 500  # knots per edge segment (only affects blockMesh, not solver)
+
+    open(edges_path, "w") do io
+        println(io, "// AUTO-GENERATED wall modulation edges — do not edit")
+        if wm.enabled && wm.mode == :single
+            # Wall edges: vertex pairs along the plate (z0 and z1 planes)
+            # z0 plane: 0→1, 1→2, ..., 5→6  (vertices 0–6)
+            # z1 plane: 21→22, ..., 26→27    (vertices 21–27)
+            z0_mm = -1.0
+            z1_mm =  1.0
+
+            for (edge_i, (vi, vj)) in enumerate(zip(0:5, 1:6))
+                xa = xverts[edge_i]
+                xb = xverts[edge_i + 1]
+
+                # Check if this edge overlaps with the bump
+                if xb <= wm.xStart || xa >= wm.xEnd
+                    continue  # entirely outside bump — straight edge is fine
+                end
+
+                # Generate knots: dense uniform within bump, sparse flat outside
+                bump_lo = max(xa, wm.xStart)
+                bump_hi = min(xb, wm.xEnd)
+
+                knots_x = Float64[]
+                # Flat before bump (few knots at y=0)
+                if xa < bump_lo
+                    for xk in range(xa, bump_lo, length=5)[2:end]
+                        push!(knots_x, xk)
+                    end
+                end
+                # Dense uniform within bump region
+                for xk in range(bump_lo, bump_hi, length=N_KNOTS + 2)[2:end-1]
+                    push!(knots_x, xk)
+                end
+                # Flat after bump (few knots at y=0)
+                if bump_hi < xb
+                    for xk in range(bump_hi, xb, length=5)[1:end-1]
+                        push!(knots_x, xk)
+                    end
+                end
+
+                knots_y = [wall_bump(xk; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak,
+                                     xEnd=wm.xEnd, p=wm.p, q=wm.q) * 1000.0
+                           for xk in knots_x]
+                knots_x_mm = knots_x .* 1000.0
+                n_total = length(knots_x)
+
+                # z0 plane
+                println(io, "    polyLine $vi $(vi+1)")
+                println(io, "    (")
+                for k in 1:n_total
+                    @Printf.printf(io, "        (%.10g %.10g %.10g)\n",
+                                   knots_x_mm[k], knots_y[k], z0_mm)
+                end
+                println(io, "    )")
+
+                # z1 plane (same x,y knots, different z)
+                vi_z1 = vi + 21
+                vj_z1 = vj + 21
+                println(io, "    polyLine $vi_z1 $vj_z1")
+                println(io, "    (")
+                for k in 1:n_total
+                    @Printf.printf(io, "        (%.10g %.10g %.10g)\n",
+                                   knots_x_mm[k], knots_y[k], z1_mm)
+                end
+                println(io, "    )")
+            end
+        end
+    end
+    @info "Generated system/wallEdges" case=basename(case_dir)
+
+    # ── Write refinement dicts for bump region (system/topoSetDict, system/refineMeshDict) ──
+    if wm.enabled && wm.mode == :single
+        bumpL = wm.xEnd - wm.xStart
+        H = p.domainHeight
+
+        # Two refinement boxes:
+        #   box1 (outer, 2×): margin = bumpL/2 on each side
+        #   box2 (middle, 4×): margin = bumpL/4 on each side
+        #   box3 (inner, 8×): exactly the bump region
+        x1_lo = max(0.0, wm.xStart - bumpL / 2)
+        x1_hi = min(L, wm.xEnd + bumpL / 2)
+        x2_lo = max(0.0, wm.xStart - bumpL / 4)
+        x2_hi = min(L, wm.xEnd + bumpL / 4)
+        x3_lo = wm.xStart
+        x3_hi = wm.xEnd
+
+        # topoSetDict — defines three cellSets
+        topo_path = joinpath(case_dir, "system", "topoSetDict")
+        open(topo_path, "w") do io
+            println(io, """FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      topoSetDict;
+}
+
+actions
+(
+    {
+        name    refineBox1;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     ($x1_lo -1 -1) ($x1_hi $(H+1) 1);
+    }
+    {
+        name    refineBox2;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     ($x2_lo -1 -1) ($x2_hi $(H+1) 1);
+    }
+    {
+        name    refineBox3;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     ($x3_lo -1 -1) ($x3_hi $(H+1) 1);
+    }
+);""")
+        end
+
+        # refineMeshDict — refine in x only
+        refine_path = joinpath(case_dir, "system", "refineMeshDict")
+        open(refine_path, "w") do io
+            println(io, """FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      refineMeshDict;
+}
+
+set             refineBox1;
+
+coordinateSystem global;
+
+globalCoeffs
+{
+    tan1    (1 0 0);
+    tan2    (0 1 0);
+}
+
+directions      (tan1);
+
+useHexTopology  yes;
+
+geometricCut    no;
+
+writeMesh       no;""")
+        end
+
+        @info "Generated refinement dicts" case=basename(case_dir)
+    end
 end
 
 const FOAM_HEADER = """/*--------------------------------*- C++ -*----------------------------------*\\

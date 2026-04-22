@@ -46,16 +46,35 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
         :mesh  => () -> begin
             write_flat_plate_input_param(case_dir)
             @info "Meshing DirectFlatPlate..."
+
+            wm = inp.DFP.wallModulation
+            refine_cmds = ""
+            if wm.enabled
+                # Pass 1: refine outer box (refineBox1) → 2×
+                # Pass 2: refine middle box (refineBox2) → 4×
+                # Pass 3: refine inner box (refineBox3) → 8× on the bump
+                refine_cmds =
+                    " && topoSet" *
+                    " && refineMesh -overwrite" *
+                    " && sed -i 's/refineBox1/refineBox2/' system/refineMeshDict" *
+                    " && topoSet" *
+                    " && refineMesh -overwrite" *
+                    " && sed -i 's/refineBox2/refineBox3/' system/refineMeshDict" *
+                    " && topoSet" *
+                    " && refineMesh -overwrite"
+            end
+
             if backend == DOCKER
                 work = "/tmp/DFP_mesh"
                 foam_exec(backend, case_dir,
-                    "rm -rf $work && cp -r . $work && cd $work && blockMesh")
+                    "rm -rf $work && cp -r . $work && cd $work" *
+                    " && blockMesh" * refine_cmds)
                 dfp_docker = docker_case_path(case_dir)
                 run(ignorestatus(`docker exec $(DOCKER_CONTAINER) bash -c
                     "rm -rf $dfp_docker/constant/polyMesh && cp -r $work/constant/polyMesh $dfp_docker/constant/polyMesh"`))
                 foam_exec(backend, case_dir, "rm -rf $work")
             else
-                foam_exec(backend, case_dir, "blockMesh")
+                foam_exec(backend, case_dir, "blockMesh" * refine_cmds)
             end
         end,
 

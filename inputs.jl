@@ -31,11 +31,24 @@ const inp = (
         freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
-        gridXfactor = 2,   # streamwise: base is 154 cells (36+6+12+6+70+24)
-        gridYfactor = 2,   # wall-normal: base is 40 cells (30 bottom + 10 top)
+        gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
+        gridYfactor = 1,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
 
         # Parallel
         nProcs = 8,
+
+        # Wall modulation — coordinates relative to domain origin (x=0 at inlet)
+        # Physical distance from virtual LE = xInlet + x
+        wallModulation = (
+            enabled = true,            # true to activate the bump
+            mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
+            A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
+            xStart  = 0.145,            # [m] start of bump (from domain inlet)
+            xPeak   = 0.147,            # [m] peak location (from domain inlet)
+            xEnd    = 0.155,            # [m] end of bump (from domain inlet)
+            p       = 10,               # front steepness exponent (≥3 for C2)
+            q       = 3,               # back steepness exponent (≥3 for C2)
+        ),
 
         # Output settings
         outputFormat = "csv",           # csv | binary
@@ -49,7 +62,7 @@ const inp = (
 
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
-            freeStreamVelocityStreamwise  = 24.84840467482210,  # [m/s]
+            freeStreamVelocityStreamwise  = 17.570475447234216,  # [m/s]
             freeStreamVelocitySpanwise    = 20.59,              # [m/s]
             freeStreamViscosity = 1.456610719354608e-5,         # [m^2/s]
         ),
@@ -64,7 +77,7 @@ const inp = (
             # Airfoil geometry
             airfoilFile = "M3J.dat",  # file in InputOutput/AirfoilData/
             chord       = 0.900,    # [m]
-            alphaDeg    = -3.0,     # [deg]
+            alphaDeg    = -3.017,   # [deg]
             xCenter     = 0.0,      # [m]
             yCenter     = 0.0,      # [m]
 

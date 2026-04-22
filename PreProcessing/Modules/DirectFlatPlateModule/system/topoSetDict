@@ -1,0 +1,32 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      topoSetDict;
+}
+
+actions
+(
+    {
+        name    refineBox1;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     (0.13999999999999999 -1 -1) (0.16 1.02 1);
+    }
+    {
+        name    refineBox2;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     (0.1425 -1 -1) (0.1575 1.02 1);
+    }
+    {
+        name    refineBox3;
+        type    cellSet;
+        action  new;
+        source  boxToCell;
+        box     (0.145 -1 -1) (0.155 1.02 1);
+    }
+);
