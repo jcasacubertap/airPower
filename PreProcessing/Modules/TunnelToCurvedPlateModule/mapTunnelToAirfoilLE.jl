@@ -294,7 +294,23 @@ function run_sampling()
         println("    $foam_cmd")
         run(`docker exec openfoam2412 bash -ic $foam_cmd`)
     else
-        foam_cmd = "source /usr/lib/openfoam/openfoam2412/etc/bashrc && " *
+        # Find OpenFOAM bashrc (version-agnostic)
+        of_bashrc = if haskey(ENV, "WM_PROJECT_DIR")
+            joinpath(ENV["WM_PROJECT_DIR"], "etc", "bashrc")
+        else
+            found = ""
+            for base in ["/usr/lib/openfoam", "/opt", "/opt/OpenFOAM",
+                         joinpath(homedir(), "OpenFOAM")]
+                isdir(base) || continue
+                for d in sort(readdir(base), rev=true)
+                    c = joinpath(base, d, "etc", "bashrc")
+                    if isfile(c); found = c; break; end
+                end
+                !isempty(found) && break
+            end
+            isempty(found) ? error("OpenFOAM bashrc not found") : found
+        end
+        foam_cmd = "source $of_bashrc && " *
                    "postProcess -case $TUNNEL_CASE -func sampleDict -time $TUNNEL_TIME"
         println("  Running: postProcess -func sampleDict -time $TUNNEL_TIME")
         run(`bash -c $foam_cmd`)

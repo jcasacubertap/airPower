@@ -12,6 +12,36 @@ function detect_backend()
     Sys.isapple() ? DOCKER : NATIVE
 end
 
+# OpenFOAM bashrc path for NATIVE backend (Linux)
+const OPENFOAM_BASHRC = let
+    # Check if already sourced
+    if haskey(ENV, "WM_PROJECT_DIR")
+        joinpath(ENV["WM_PROJECT_DIR"], "etc", "bashrc")
+    else
+        # Search common install locations for any OpenFOAM version
+        found = ""
+        for base in ["/usr/lib/openfoam", "/opt", "/opt/OpenFOAM",
+                     joinpath(homedir(), "OpenFOAM")]
+            isdir(base) || continue
+            for d in sort(readdir(base), rev=true)  # newest version first
+                candidate = joinpath(base, d, "etc", "bashrc")
+                if isfile(candidate)
+                    found = candidate
+                    break
+                end
+            end
+            !isempty(found) && break
+        end
+        if isempty(found)
+            @warn "OpenFOAM bashrc not found — source OpenFOAM before running, or set WM_PROJECT_DIR"
+            "openfoam_not_found"
+        else
+            @info "Found OpenFOAM: $found"
+            found
+        end
+    end
+end
+
 const DOCKER_CONTAINER = "openfoam2412"
 const DOCKER_MOUNT_HOST = joinpath(homedir(), "OpenFOAM", "cases")
 const DOCKER_MOUNT_CONTAINER = "/home/openfoam"
@@ -42,7 +72,7 @@ function foam_exec(backend::BackendType, case_path::AbstractString, cmd::Abstrac
         container_path = docker_case_path(case_path)
         full_cmd = `docker exec $(DOCKER_CONTAINER) bash -c "source /openfoam/bash.rc && cd $(container_path) && $(cmd)"`
     else
-        full_cmd = `bash -c "cd $(abspath(case_path)) && source /usr/lib/openfoam/openfoam2412/etc/bashrc && $(cmd)"`
+        full_cmd = `bash -c "cd $(abspath(case_path)) && source $(OPENFOAM_BASHRC) && $(cmd)"`
     end
     verbose && @info "Running: $cmd" case=basename(case_path)
     proc = run(ignorestatus(full_cmd), wait=true)
