@@ -221,7 +221,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             expval = nothing
             if inp.VAL.valPlot
                 expval = plot_experimental_validation(airfoil_case;
-                    savedir=plotting_dir, gen=inp.VAL.Gen, delta=0.010, geom_args...)
+                    savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case, delta=0.010, geom_args...)
             end
 
             return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq,

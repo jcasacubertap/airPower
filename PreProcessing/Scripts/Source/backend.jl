@@ -79,12 +79,57 @@ Generalized smoothstep: S(0)=0, S(1)=1, S'(0)=S'(1)=0 for n≥2.
 _smoothstep(t, n) = t^n / (t^n + (1 - t)^n)
 
 """
-    wall_bump(x; A, xStart, xPeak, xEnd, p, q)
+    _esn_geometry(wm) → (xStart, xEnd)
 
-Evaluate the wall modulation height at position x.
-Uses piecewise sigmoidal smoothstep for C2 continuity (p,q ≥ 3).
+Compute the truncated base extent of the ESN bump from its parameters.
+Returns (xStart, xEnd) in domain coordinates.
 """
-function wall_bump(x; A, xStart, xPeak, xEnd, p, q)
+function _esn_geometry(wm)
+    # Unscaled ESN on wide range
+    x_esn = range(-8, 8, length=10000)
+    sigma_left  = 1.0 + wm.epsilon
+    sigma_right = 1.0 - wm.epsilon
+
+    y_esn = [xi < 0 ? exp(-xi^2 / (2 * sigma_left^2)) :
+                       exp(-xi^2 / (2 * sigma_right^2))
+             for xi in x_esn]
+
+    # Truncate tails at yTol / A (normalized)
+    tol_norm = wm.yTol / abs(wm.A)
+    idx1 = findlast(i -> y_esn[i] < tol_norm && x_esn[i] < 0, 1:length(x_esn))
+    idx2 = findfirst(i -> y_esn[i] < tol_norm && x_esn[i] > 0, 1:length(x_esn))
+    if idx1 === nothing; idx1 = 1; end
+    if idx2 === nothing; idx2 = length(x_esn); end
+
+    b_esn = x_esn[idx2] - x_esn[idx1]  # unscaled truncated base width
+
+    # Scale to target base width
+    b_target = wm.R * abs(wm.A)
+    scale = b_target / b_esn
+
+    xStart = wm.xCenter + x_esn[idx1] * scale
+    xEnd   = wm.xCenter + x_esn[idx2] * scale
+    return (xStart, xEnd)
+end
+
+"""
+    _esn_geometry_full(wm) → (xStart_full, xEnd_full)
+
+Like _esn_geometry but includes the 5% blend zones on each side.
+Used for polyLine extent and vertex checks.
+"""
+function _esn_geometry_full(wm)
+    xStart, xEnd = _esn_geometry(wm)
+    blend_w_phys = 0.05 * (xEnd - xStart)  # 5% of bump width in physical coords
+    return (xStart - blend_w_phys, xEnd + blend_w_phys)
+end
+
+"""
+    wall_bump_sigmoidal(x; A, xStart, xPeak, xEnd, p, q)
+
+Sigmoidal bump: piecewise smoothstep, C2 for p,q ≥ 3, compact support.
+"""
+function wall_bump_sigmoidal(x; A, xStart, xPeak, xEnd, p, q)
     (x <= xStart || x >= xEnd) && return 0.0
     if x <= xPeak
         t = (x - xStart) / (xPeak - xStart)
@@ -92,6 +137,73 @@ function wall_bump(x; A, xStart, xPeak, xEnd, p, q)
     else
         s = (x - xPeak) / (xEnd - xPeak)
         return A * (1.0 - _smoothstep(s, q))
+    end
+end
+
+"""
+    wall_bump_esn(x; A, xCenter, epsilon, R, yTol)
+
+Epsilon-Skewed Normal bump: split Gaussian with skewness.
+Inside the yTol truncation boundaries: exact ESN shape.
+Outside: C2-smooth blend from yTol to 0 over 5% of the bump width.
+"""
+function wall_bump_esn(x; A, xCenter, epsilon, R, yTol)
+    # Unscaled ESN
+    sigma_left  = 1.0 + epsilon
+    sigma_right = 1.0 - epsilon
+
+    # Compute unscaled truncation boundaries at yTol level
+    tol_norm = yTol / abs(A)
+    tol_norm >= 1.0 && return 0.0
+    x_trunc_left  = -sigma_left  * sqrt(-2.0 * log(tol_norm))
+    x_trunc_right =  sigma_right * sqrt(-2.0 * log(tol_norm))
+    b_esn = x_trunc_right - x_trunc_left
+
+    # Scale to target width
+    b_target = R * abs(A)
+    scale = b_target / b_esn
+
+    # Blend zone: 5% of bump width on each side
+    blend_w = 0.05 * b_esn
+
+    # Evaluate in scaled coordinates
+    xi = (x - xCenter) / scale
+
+    if xi > x_trunc_left && xi < x_trunc_right
+        # Inside truncation: exact ESN
+        sigma = xi < 0 ? sigma_left : sigma_right
+        return A * exp(-xi^2 / (2.0 * sigma^2))
+    elseif xi >= x_trunc_left - blend_w && xi <= x_trunc_left
+        # Left blend: Gaussian × fade-out window (preserves slope continuity)
+        sigma = sigma_left
+        gauss = A * exp(-xi^2 / (2.0 * sigma^2))
+        t = (xi - (x_trunc_left - blend_w)) / blend_w  # 0 at outer, 1 at boundary
+        return gauss * _smoothstep(t, 3)
+    elseif xi >= x_trunc_right && xi <= x_trunc_right + blend_w
+        # Right blend: Gaussian × fade-out window
+        sigma = sigma_right
+        gauss = A * exp(-xi^2 / (2.0 * sigma^2))
+        t = (xi - x_trunc_right) / blend_w  # 0 at boundary, 1 at outer
+        return gauss * (1.0 - _smoothstep(t, 3))
+    else
+        return 0.0
+    end
+end
+
+"""
+    wall_bump(x, wm)
+
+Dispatch to the appropriate bump function based on wm.shape.
+"""
+function wall_bump(x, wm)
+    if wm.shape == :sigmoidal
+        return wall_bump_sigmoidal(x; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak,
+                                   xEnd=wm.xEnd, p=wm.p, q=wm.q)
+    elseif wm.shape == :esn
+        return wall_bump_esn(x; A=wm.A, xCenter=wm.xCenter, epsilon=wm.epsilon,
+                              R=wm.R, yTol=wm.yTol)
+    else
+        error("Unknown wall modulation shape: $(wm.shape)")
     end
 end
 
@@ -108,12 +220,34 @@ function write_flat_plate_input_param(case_dir::AbstractString)
     # Compute wall vertex y-displacements [mm] at the 7 block boundaries
     L = p.domainLength
     xverts = [0.0, 3.0/13.0*L, 7.0/26.0*L, 9.0/26.0*L, 5.0/13.0*L, 11.0/13.0*L, L]
+
+    # Base cell counts per block (must match blockMeshDict base values)
+    nx_base = [144, 24, 48, 24, 280, 96]
+    gx = p.gridXfactor
+    gy = p.gridYfactor
+
     if wm.enabled && wm.mode == :single
-        yverts = [wall_bump(xv; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak,
-                            xEnd=wm.xEnd, p=wm.p, q=wm.q) * 1000.0  # m → mm
-                  for xv in xverts]
+        # Bump extent: full (with blend zones) for vertices/polyLine
+        #              yTol-based for refinement boxes
+        if wm.shape == :sigmoidal
+            vbump_xs, vbump_xe = wm.xStart, wm.xEnd
+            rbump_xs, rbump_xe = wm.xStart, wm.xEnd
+        else
+            vbump_xs, vbump_xe = _esn_geometry_full(wm)  # includes blend
+            rbump_xs, rbump_xe = _esn_geometry(wm)        # yTol boundaries
+        end
+        # Vertices: evaluate bump (returns 0 outside full extent naturally)
+        yverts = [wall_bump(xv, wm) * 1000.0 for xv in xverts]  # mm
+        # Block x-cell counts: multiply by bumpXrefine for blocks overlapping the bump
+        bxr = wm.bumpXrefine
+        nx_final = [let xa = xverts[i]; xb = xverts[i+1]
+                        overlaps = !(xb <= rbump_xs || xa >= rbump_xe)
+                        round(Int, nx_base[i] * gx * (overlaps ? bxr : 1))
+                    end
+                    for i in 1:6]
     else
         yverts = zeros(7)
+        nx_final = [round(Int, nx_base[i] * gx) for i in 1:6]
     end
 
     path = joinpath(case_dir, "constant", "inputParam")
@@ -178,6 +312,14 @@ wallMod
  y4       $(yverts[5]);
  y5       $(yverts[6]);
  y6       $(yverts[7]);
+ Nx1      $(nx_final[1]);
+ Nx2      $(nx_final[2]);
+ Nx3      $(nx_final[3]);
+ Nx4      $(nx_final[4]);
+ Nx5      $(nx_final[5]);
+ Nx6      $(nx_final[6]);
+ NyB      $(round(Int, 120 * gy));
+ NyT      $(round(Int, 40 * gy));
 }
 
 // ************************************************************************* //""")
@@ -186,11 +328,19 @@ wallMod
 
     # ── Write wall polyLine edges (system/wallEdges) ──
     edges_path = joinpath(case_dir, "constant", "wallEdges")
-    N_KNOTS = 500  # knots per edge segment (only affects blockMesh, not solver)
+    N_KNOTS = 2000  # knots per edge segment (only affects blockMesh, not solver)
 
     open(edges_path, "w") do io
         println(io, "// AUTO-GENERATED wall modulation edges — do not edit")
         if wm.enabled && wm.mode == :single
+            # Full bump extent (with blend) for polyLine edge overlap check
+            if wm.shape == :sigmoidal
+                bump_xStart = wm.xStart
+                bump_xEnd   = wm.xEnd
+            elseif wm.shape == :esn
+                bump_xStart, bump_xEnd = _esn_geometry_full(wm)
+            end
+
             # Wall edges: vertex pairs along the plate (z0 and z1 planes)
             # z0 plane: 0→1, 1→2, ..., 5→6  (vertices 0–6)
             # z1 plane: 21→22, ..., 26→27    (vertices 21–27)
@@ -202,34 +352,17 @@ wallMod
                 xb = xverts[edge_i + 1]
 
                 # Check if this edge overlaps with the bump
-                if xb <= wm.xStart || xa >= wm.xEnd
+                if xb <= bump_xStart || xa >= bump_xEnd
                     continue  # entirely outside bump — straight edge is fine
                 end
 
                 # Generate knots: dense uniform within bump, sparse flat outside
-                bump_lo = max(xa, wm.xStart)
-                bump_hi = min(xb, wm.xEnd)
+                bump_lo = max(xa, bump_xStart)
+                bump_hi = min(xb, bump_xEnd)
 
-                knots_x = Float64[]
-                # Flat before bump (few knots at y=0)
-                if xa < bump_lo
-                    for xk in range(xa, bump_lo, length=5)[2:end]
-                        push!(knots_x, xk)
-                    end
-                end
-                # Dense uniform within bump region
-                for xk in range(bump_lo, bump_hi, length=N_KNOTS + 2)[2:end-1]
-                    push!(knots_x, xk)
-                end
-                # Flat after bump (few knots at y=0)
-                if bump_hi < xb
-                    for xk in range(bump_hi, xb, length=5)[1:end-1]
-                        push!(knots_x, xk)
-                    end
-                end
-
-                knots_y = [wall_bump(xk; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak,
-                                     xEnd=wm.xEnd, p=wm.p, q=wm.q) * 1000.0
+                # Uniform knots: y=0 outside bump, bump shape inside
+                knots_x = collect(range(xa, xb, length=N_KNOTS + 2)[2:end-1])
+                knots_y = [bump_xStart < xk < bump_xEnd ? wall_bump(xk, wm) * 1000.0 : 0.0
                            for xk in knots_x]
                 knots_x_mm = knots_x .* 1000.0
                 n_total = length(knots_x)
@@ -260,19 +393,26 @@ wallMod
 
     # ── Write refinement dicts for bump region (system/topoSetDict, system/refineMeshDict) ──
     if wm.enabled && wm.mode == :single
-        bumpL = wm.xEnd - wm.xStart
+        # Refinement uses yTol extent (not the blend zones)
+        if wm.shape == :sigmoidal
+            bump_xs = wm.xStart
+            bump_xe = wm.xEnd
+        elseif wm.shape == :esn
+            bump_xs, bump_xe = _esn_geometry(wm)
+        end
+        bumpL = bump_xe - bump_xs
         H = p.domainHeight
 
-        # Two refinement boxes:
+        # Three refinement boxes:
         #   box1 (outer, 2×): margin = bumpL/2 on each side
         #   box2 (middle, 4×): margin = bumpL/4 on each side
         #   box3 (inner, 8×): exactly the bump region
-        x1_lo = max(0.0, wm.xStart - bumpL / 2)
-        x1_hi = min(L, wm.xEnd + bumpL / 2)
-        x2_lo = max(0.0, wm.xStart - bumpL / 4)
-        x2_hi = min(L, wm.xEnd + bumpL / 4)
-        x3_lo = wm.xStart
-        x3_hi = wm.xEnd
+        x1_lo = max(0.0, bump_xs - bumpL / 2)
+        x1_hi = min(L, bump_xe + bumpL / 2)
+        x2_lo = max(0.0, bump_xs - bumpL / 4)
+        x2_hi = min(L, bump_xe + bumpL / 4)
+        x3_lo = bump_xs
+        x3_hi = bump_xe
 
         # topoSetDict — defines three cellSets
         topo_path = joinpath(case_dir, "system", "topoSetDict")

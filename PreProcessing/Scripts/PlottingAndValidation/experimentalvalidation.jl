@@ -6,11 +6,12 @@ using MAT, DelimitedFiles, Printf, LaTeXStrings
 
 One subplot per experimental station (x/c), each showing OpenFOAM w-profile
 (line) and PIV w_m z-averaged profile (symbols).  Stations are discovered from
-`Validation/Gen{gen}/Experimental/Case0/xc{NN}/stats_raw.mat`.
+`Validation/Gen{gen}/Experimental/Case{case_id}/xc{NN}/stats_raw.mat`.
 """
 function plot_experimental_validation(case_path::AbstractString;
                                       savedir::AbstractString=case_path,
                                       gen::Int=0,
+                                      case_id::Int=0,
                                       chord_mm::Float64=900.0,
                                       alpha_deg::Float64=-3.0,
                                       x_center_mm::Float64=0.0,
@@ -19,7 +20,7 @@ function plot_experimental_validation(case_path::AbstractString;
                                       strip_width::Float64=0.005)
     # ── Discover experimental stations ──
     val_dir = joinpath(ROOT, "PreProcessing", "InputOutput", "Validation",
-                       "Gen$gen", "Experimental", "Case0")
+                       "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
         @warn "Validation directory not found: $val_dir"
         return nothing

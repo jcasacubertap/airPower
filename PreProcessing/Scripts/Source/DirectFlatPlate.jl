@@ -1,4 +1,86 @@
 """
+    _plot_wall_modulation_check(case_dir, wm, savedir)
+
+Plot expected bump shape (solid line) vs actual mesh wall coordinates (symbols),
+zoomed to the refinement region.
+"""
+function _plot_wall_modulation_check(case_dir::AbstractString, wm, savedir::AbstractString)
+    # Compute bump extent
+    if wm.shape == :sigmoidal
+        bump_xs = wm.xStart
+        bump_xe = wm.xEnd
+    elseif wm.shape == :esn
+        bump_xs, bump_xe = _esn_geometry(wm)
+    end
+    bumpL = bump_xe - bump_xs
+
+    # Plot range: refinement box1 extent (bump ± 50% bump width)
+    x_lo = max(0.0, bump_xs - bumpL / 2)
+    x_hi = bump_xe + bumpL / 2
+
+    # Expected shape (dense sampling)
+    x_expected = range(x_lo, x_hi, length=2000)
+    h_expected = [wall_bump(xi, wm) * 1000.0 for xi in x_expected]  # mm
+
+    # Actual mesh wall: parse plate patch face centres
+    x_mesh = Float64[]
+    y_mesh = Float64[]
+    try
+        xm, ym = parse_patch_face_centers(case_dir, "plate")
+        # Filter to plot range and one z-layer
+        for i in eachindex(xm)
+            if x_lo <= xm[i] <= x_hi
+                push!(x_mesh, xm[i])
+                push!(y_mesh, ym[i] * 1000.0)  # mm
+            end
+        end
+    catch e
+        @warn "Could not parse mesh wall: $e"
+    end
+
+    mkpath(savedir)
+
+    common_opts = (
+        xlabel     = "x [m]",
+        ylabel     = "h [mm]",
+        framestyle = :box,
+        grid       = true,
+        gridalpha  = 0.3,
+        tickfontsize   = 10,
+        guidefontsize  = 12,
+        legendfontsize = 9,
+        left_margin    = 8Plots.mm,
+        bottom_margin  = 6Plots.mm,
+        size       = (900, 400),
+        dpi        = 200,
+        legend     = :topright,
+    )
+
+    # Symbols first (underneath)
+    if !isempty(x_mesh)
+        fig = scatter(x_mesh, y_mesh;
+            label      = "Mesh wall (face centres)",
+            color      = :firebrick,
+            markersize = 2,
+            markerstrokewidth = 0,
+            common_opts...)
+    else
+        fig = plot(; common_opts...)
+    end
+
+    # Solid line on top
+    plot!(fig, x_expected, h_expected;
+        label      = "Expected shape",
+        color      = :black,
+        linewidth  = 2,
+    )
+
+    outfile = joinpath(savedir, "wallModulationCheck.png")
+    savefig(fig, outfile)
+    @info "Saved: $outfile"
+end
+
+"""
     make_direct_flat_plate(backend, root) → Dict{Symbol, Function}
 
 Direct flat-plate base-flow computation (single OpenFOAM case).
@@ -49,20 +131,9 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
 
             wm = inp.DFP.wallModulation
             refine_cmds = ""
-            if wm.enabled
-                # Pass 1: refine outer box (refineBox1) → 2×
-                # Pass 2: refine middle box (refineBox2) → 4×
-                # Pass 3: refine inner box (refineBox3) → 8× on the bump
-                refine_cmds =
-                    " && topoSet" *
-                    " && refineMesh -overwrite" *
-                    " && sed -i 's/refineBox1/refineBox2/' system/refineMeshDict" *
-                    " && topoSet" *
-                    " && refineMesh -overwrite" *
-                    " && sed -i 's/refineBox2/refineBox3/' system/refineMeshDict" *
-                    " && topoSet" *
-                    " && refineMesh -overwrite"
-            end
+            # Note: topoSet/refineMesh disabled — it distorts the bump geometry
+            # (face centres are averaged, not re-evaluated on the polyLine).
+            # Use gridXfactor for resolution instead.
 
             if backend == DOCKER
                 work = "/tmp/DFP_mesh"
@@ -75,6 +146,12 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
                 foam_exec(backend, case_dir, "rm -rf $work")
             else
                 foam_exec(backend, case_dir, "blockMesh" * refine_cmds)
+            end
+
+            # Plot bump vs actual mesh wall in the refinement region
+            if wm.enabled
+                @info "Generating wall modulation verification plot..."
+                _plot_wall_modulation_check(case_dir, wm, plotting_dir)
             end
         end,
 
@@ -130,7 +207,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             fields = plot_fields(case_dir; savedir=plotting_dir)
             wval   = nothing
             if inp.VAL.valPlot
-                wval = plot_dfp_w_validation(case_dir; savedir=plotting_dir, gen=inp.VAL.Gen)
+                wval = plot_dfp_w_validation(case_dir; savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case)
             end
 
             return (residuals=res, fields=fields, wval=wval)

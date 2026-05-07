@@ -12,7 +12,8 @@ The x/c station maps to arc-length via BL.S(BL.x), then to x_DFP = S - xInlet.
 """
 function plot_dfp_w_validation(case_path::AbstractString;
                                savedir::AbstractString=case_path,
-                               gen::Int=0)
+                               gen::Int=0,
+                               case_id::Int=0)
     # ── Load reference data for S ↔ x mapping ──
     flow_data_dir = joinpath(ROOT, "PreProcessing", "InputOutput", "AirfoilFlowData")
     mat_files = filter(f -> endswith(f, ".mat"), readdir(flow_data_dir))
@@ -28,7 +29,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
 
     # ── Discover experimental stations ──
     val_dir = joinpath(ROOT, "PreProcessing", "InputOutput", "Validation",
-                       "Gen$gen", "Experimental", "Case0")
+                       "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
         @warn "Validation directory not found: $val_dir"
         return nothing

@@ -88,6 +88,18 @@ function plot_fields(case_path::AbstractString;
     ms = length(x) > 50_000 ? 1 : 2
 
     use_airfoil = chord_mm !== nothing
+
+    # Detect if mesh is structured (for heatmap) or deformed (use scatter)
+    use_scatter = use_airfoil  # airfoil always uses scatter
+    if !use_scatter
+        # Check if structured reshape would have NaNs (deformed mesh, e.g., bump)
+        xu_test, yu_test, F_test = structured_reshape(x, y, u)
+        nan_frac = sum(isnan.(F_test)) / length(F_test)
+        if nan_frac > 0.01
+            use_scatter = true
+            @info "Deformed mesh detected ($(round(nan_frac*100, digits=1))% NaN) — using scatter plots"
+        end
+    end
     colors = [:royalblue, :firebrick, :forestgreen, :darkorange, :purple, :teal]
 
     common_sc = (
@@ -174,8 +186,25 @@ function plot_fields(case_path::AbstractString;
                 x_center_mm=x_center_mm, y_center_mm=y_center_mm)
             return x_s
         end
+    elseif use_scatter
+        # Deformed DFP grid (bump enabled): scatter + vertical strip profiles
+        x_lo_v, x_hi_v = extrema(x)
+        prof_stations = stations !== nothing ? stations : collect(range(x_lo_v, x_hi_v, length=5))
+        strip_w_vert = 0.005 * dx
+        prof_ylabel = L"y \ \mathrm{[m]}"
+        prof_ylims  = (minimum(y), minimum(y) + 0.25 * dy)
+
+        extract_profile = (xv, yv, fv, x_st) -> begin
+            mask = abs.(xv .- x_st) .< strip_w_vert
+            !any(mask) && return Float64[], Float64[]
+            perm = sortperm(yv[mask])
+            return fv[mask][perm], yv[mask][perm]
+        end
+
+        station_label = st -> latexstring(@sprintf("x = %.3f", st), raw" \ \mathrm{m}")
+        station_x_pos = st -> st
     else
-        # Structured grid (DFP): use heatmap + column extraction
+        # Structured grid (flat DFP): heatmap + column extraction
         xu, yu, F_u_s = structured_reshape(x, y, u)
         _,  _,  F_v_s = structured_reshape(x, y, v)
         _,  _,  F_w_s = structured_reshape(x, y, w)
@@ -242,6 +271,42 @@ function plot_fields(case_path::AbstractString;
                 isempty(fprof) && continue
                 c = colors[mod1(k, length(colors))]
                 plot!(p_pr, fprof, dprof;
+                      label=station_label(st), color=c,
+                      marker=:circle, markersize=3, markercolor=c,
+                      markerstrokecolor=:black, markerstrokewidth=0.5)
+            end
+
+            fig = plot(p_cont, p_pr;
+                layout = @layout([a{0.55w} b{0.45w}]), size = (1300, 450))
+            outfile = joinpath(savedir, "$(outname)$(label).png")
+            savefig(fig, outfile); @info "Saved: $outfile"
+            return fig
+        end
+
+        fig_u = make_velocity_figure(u, "u", L"u \ \mathrm{[m/s]}", "uField")
+        fig_v = make_velocity_figure(v, "v", L"v \ \mathrm{[m/s]}", "vField")
+        fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
+        p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
+    elseif use_scatter
+        # Deformed DFP (bump): scatter + vertical strip profiles
+        make_velocity_figure = (fv, comp_label, comp_latex, outname) -> begin
+            p_cont = scatter(x, y;
+                marker_z       = fv,
+                colorbar_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}"),
+                color          = :viridis,
+                common_sc...)
+            for (k, st) in enumerate(prof_stations)
+                vline!(p_cont, [st]; color=colors[mod1(k, length(colors))],
+                       linestyle=:dash, linewidth=1.2, label=false)
+            end
+
+            p_pr = plot(; xlabel=comp_latex, ylabel=prof_ylabel,
+                ylims=prof_ylims, legend=:outerright, common_prof...)
+            for (k, st) in enumerate(prof_stations)
+                fprof, yprof = extract_profile(x, y, fv, st)
+                isempty(fprof) && continue
+                c = colors[mod1(k, length(colors))]
+                plot!(p_pr, fprof, yprof;
                       label=station_label(st), color=c,
                       marker=:circle, markersize=3, markercolor=c,
                       markerstrokecolor=:black, markerstrokewidth=0.5)

@@ -15,37 +15,13 @@ const ROOT = let
     dir
 end
 include(joinpath(ROOT, "inputs.jl"))
+include(joinpath(ROOT, "PreProcessing", "Scripts", "Source", "backend.jl"))
 
 using Plots
 gr()
 default(fontfamily = "Computer Modern")
 
-# ── Smoothstep bump function ──────────────────────────────────────────
-"""
-    smoothstep(t, n)
-
-Generalized smoothstep: S(0)=0, S(1)=1, S'(0)=S'(1)=0 for n≥2.
-"""
-smoothstep(t, n) = t^n / (t^n + (1 - t)^n)
-
-"""
-    wall_bump(x; A, xStart, xPeak, xEnd, p, q)
-
-Evaluate the wall modulation height at position x.
-Uses piecewise sigmoidal smoothstep for C2 continuity (p,q ≥ 3).
-"""
-function wall_bump(x; A, xStart, xPeak, xEnd, p, q)
-    (x <= xStart || x >= xEnd) && return 0.0
-    if x <= xPeak
-        t = (x - xStart) / (xPeak - xStart)
-        return A * smoothstep(t, p)
-    else
-        s = (x - xPeak) / (xEnd - xPeak)
-        return A * (1.0 - smoothstep(s, q))
-    end
-end
-
-# ── Read inputs and plot ──────────────────────────────────────────────
+# ── Read inputs ───────────────────────────────────────────────────────
 wm = inp.DFP.wallModulation
 
 if !wm.enabled
@@ -60,12 +36,24 @@ end
 # Domain range
 L = inp.DFP.domainLength
 x = range(0, L, length=1000)
-h = [wall_bump(xi; A=wm.A, xStart=wm.xStart, xPeak=wm.xPeak, xEnd=wm.xEnd, p=wm.p, q=wm.q) for xi in x]
+h = [wall_bump(xi, wm) for xi in x]
 
-fig = plot(x, h .* 1000;   # convert to mm for readability
+# Determine bump extent and title for either shape
+if wm.shape == :sigmoidal
+    bump_xs = wm.xStart
+    bump_xe = wm.xEnd
+    bump_xp = wm.xPeak
+    title_str = "Sigmoidal (A=$(wm.A*1000) mm, p=$(wm.p), q=$(wm.q))"
+elseif wm.shape == :esn
+    bump_xs, bump_xe = _esn_geometry(wm)
+    bump_xp = wm.xCenter
+    title_str = "ESN (A=$(wm.A*1000) mm, ε=$(wm.epsilon), R=$(wm.R))"
+end
+
+fig = plot(x, h .* 1000;   # convert to mm
     xlabel     = "x [m]",
     ylabel     = "h [mm]",
-    title      = "Wall modulation (A=$(wm.A*1000) mm, p=$(wm.p), q=$(wm.q))",
+    title      = title_str,
     color      = :black,
     linewidth  = 2,
     legend     = false,
@@ -83,7 +71,7 @@ fig = plot(x, h .* 1000;   # convert to mm for readability
 )
 
 # Mark key positions
-vline!(fig, [wm.xStart, wm.xPeak, wm.xEnd];
+vline!(fig, [bump_xs, bump_xp, bump_xe];
     color=:gray, linestyle=:dash, linewidth=0.8, label=false)
 
 # Save

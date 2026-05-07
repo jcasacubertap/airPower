@@ -42,12 +42,24 @@ const inp = (
         wallModulation = (
             enabled = true,            # true to activate the bump
             mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
+            shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
             A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
-            xStart  = 0.145,            # [m] start of bump (from domain inlet)
-            xPeak   = 0.147,            # [m] peak location (from domain inlet)
-            xEnd    = 0.155,            # [m] end of bump (from domain inlet)
-            p       = 10,               # front steepness exponent (≥3 for C2)
-            q       = 3,               # back steepness exponent (≥3 for C2)
+
+            # Sigmoidal parameters (shape = :sigmoidal)
+            xStart  = 0.155,           # [m] start of bump (from domain inlet)
+            xPeak   = 0.157,           # [m] peak location (from domain inlet)
+            xEnd    = 0.165,           # [m] end of bump (from domain inlet)
+            p       = 10,              # front steepness exponent (≥3 for C2)
+            q       = 3,              # back steepness exponent (≥3 for C2)
+
+            # ESN parameters (shape = :esn)
+            xCenter = 0.15,            # [m] bump center (from domain inlet)
+            epsilon = 0.0,             # skewness (-1 to 1)
+            R       = 50,             # base-to-height ratio [-]
+            yTol    = 1e-5,           # [m] tail truncation tolerance
+
+            # Local refinement
+            bumpXrefine = 2,           # x-cell multiplier for blocks overlapping the bump
         ),
 
         # Output settings
@@ -144,6 +156,7 @@ const inp = (
         ),
         valPlot = true,   # true: overlay reference data on validation plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
+        Case    = 1,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
     ),
 
 )
