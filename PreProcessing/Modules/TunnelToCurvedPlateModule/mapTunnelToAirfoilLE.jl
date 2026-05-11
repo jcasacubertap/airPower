@@ -198,6 +198,101 @@ function compute_face_centers(faces::Vector{Vector{Int}},
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Airfoil geometry helpers (for BL pressure clamping)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""Read airfoil .dat (full contour), return upper-surface (xi, eta) sorted LE→TE."""
+function load_airfoil_upper(filepath::String)
+    xi_all, eta_all = Float64[], Float64[]
+    for line in eachline(filepath)
+        line = strip(line)
+        isempty(line) && continue
+        parts = split(line)
+        length(parts) >= 2 || continue
+        x = tryparse(Float64, parts[1])
+        y = tryparse(Float64, parts[2])
+        (x === nothing || y === nothing) && continue
+        push!(xi_all, x); push!(eta_all, y)
+    end
+    mask = eta_all .>= 0.0
+    xi_up, eta_up = xi_all[mask], eta_all[mask]
+    perm = sortperm(xi_up)
+    xi_up, eta_up = xi_up[perm], eta_up[perm]
+    keep = [true; [!(xi_up[i] == xi_up[i-1] && eta_up[i] == eta_up[i-1]) for i in 2:length(xi_up)]]
+    return xi_up[keep], eta_up[keep]
+end
+
+"""Linear interpolation in a sorted table."""
+function interp1_linear(xd::Vector{Float64}, yd::Vector{Float64}, xq::Float64)
+    n = length(xd)
+    xq <= xd[1]   && return yd[1]
+    xq >= xd[end] && return yd[end]
+    for i in 1:n-1
+        if xd[i] <= xq <= xd[i+1]
+            t = (xq - xd[i]) / (xd[i+1] - xd[i])
+            return (1 - t) * yd[i] + t * yd[i+1]
+        end
+    end
+    return yd[end]
+end
+
+"""
+Wall point on the airfoil at chord fraction `xi`, given side (:upper or :lower),
+chord [m], AoA [deg], centre [m]. Returns (x_w, y_w) in metres.
+"""
+function airfoil_wall_point(xi::Float64, side::Symbol,
+                            xi_data::Vector{Float64}, eta_data::Vector{Float64},
+                            chord::Float64, alpha_deg::Float64,
+                            x_center::Float64, y_center::Float64)
+    eta = interp1_linear(xi_data, eta_data, xi)
+    side == :lower && (eta = -eta)
+    α  = alpha_deg * π / 180
+    Xp = xi * chord - 0.5 * chord
+    Yp = eta * chord
+    Xr =  cos(α) * Xp + sin(α) * Yp
+    Yr = -sin(α) * Xp + cos(α) * Yp
+    return (x_center + Xr, y_center + Yr)
+end
+
+"""Blasius 99% BL thickness: δ = 5 √(ν x / U)."""
+blasius_delta(x, nu, U) = 5.0 * sqrt(nu * x / U)
+
+"""
+Clamp p_values within `delta_clamp` of `wall_point` to the value at the first
+face outside that band. Modifies `p_values` in place; returns (n_clamped, p_edge).
+"""
+function clamp_pressure_in_bl!(centers::Vector{NTuple{3,Float64}},
+                               p_values::Vector{Float64},
+                               wall_point::Tuple{Float64,Float64},
+                               delta_clamp::Float64)
+    n = length(centers)
+    edge_idx, edge_dist = 0, Inf
+    dists = Vector{Float64}(undef, n)
+    for i in 1:n
+        dx = centers[i][1] - wall_point[1]
+        dy = centers[i][2] - wall_point[2]
+        dists[i] = sqrt(dx*dx + dy*dy)
+        if dists[i] >= delta_clamp && dists[i] < edge_dist
+            edge_dist = dists[i]
+            edge_idx  = i
+        end
+    end
+    if edge_idx == 0
+        @warn "clamp_pressure_in_bl!: all faces fall inside the BL clamp band; nothing clamped."
+        return 0, NaN
+    end
+    p_edge = p_values[edge_idx]
+    n_clamped = 0
+    for i in 1:n
+        if dists[i] < delta_clamp
+            p_values[i] = p_edge
+            n_clamped += 1
+        end
+    end
+    return n_clamped, p_edge
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  sampleDict generation
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -537,6 +632,26 @@ function main()
 
     pp_dir = joinpath(TUNNEL_CASE, "postProcessing", "sampleDict", TUNNEL_TIME)
 
+    # ── Pre-load airfoil geometry if BL pressure clamping is enabled ────────
+    a = inp.TTCP.airfoilLE
+    t = inp.TTCP.tunnel
+    clamp_bl = a.clampOutletPressureBL
+    xi_data, eta_data = (Float64[], Float64[])
+    if clamp_bl
+        # Resolve airfoil .dat path (same convention as generateGrid.jl)
+        root_dir = dirname(find_ancestor_file(@__DIR__, "inputs.jl"))
+        af_path  = joinpath(root_dir, "PreProcessing", "InputOutput",
+                            "AirfoilGeometryData", t.airfoilFile)
+        xi_data, eta_data = load_airfoil_upper(af_path)
+        println("  BL clamp enabled (factor=$(a.clampOutletPressureBLFactor))")
+    end
+
+    # xi and side per outlet patch
+    outlet_geom = Dict(
+        "suctionOutlet"  => (xi=Float64(a.xiSuctionOutlet),  side=:upper),
+        "pressureOutlet" => (xi=Float64(a.xiPressureOutlet), side=:lower),
+    )
+
     for (patch_name, fields) in patch_fields
         set_name = patch_name * "Probes"
         centers  = patch_centers[patch_name]
@@ -606,6 +721,20 @@ function main()
             else
                 error("Invalid choice: '$choice'. Aborting.")
             end
+        end
+
+        # ── BL pressure clamp (only on outlets that carry p) ────────────────
+        if clamp_bl && "p" in fields && haskey(outlet_geom, patch_name)
+            og = outlet_geom[patch_name]
+            wall_pt = airfoil_wall_point(og.xi, og.side, xi_data, eta_data,
+                                         t.chord, t.alphaDeg, t.xCenter, t.yCenter)
+            x_le    = og.xi * t.chord
+            U_chord = inp.TTCP.flow.freeStreamVelocityStreamwise
+            nu      = inp.TTCP.flow.freeStreamViscosity
+            δ       = a.clampOutletPressureBLFactor * blasius_delta(x_le, nu, U_chord)
+            n_cl, p_edge = clamp_pressure_in_bl!(centers, p_values, wall_pt, δ)
+            @printf("  %s: BL clamp δ=%.4g m → %d/%d faces clamped to p=%.4g\n",
+                    patch_name, δ, n_cl, length(centers), p_edge)
         end
 
         for field in fields

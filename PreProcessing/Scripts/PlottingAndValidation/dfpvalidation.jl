@@ -91,10 +91,24 @@ function plot_dfp_w_validation(case_path::AbstractString;
     strip_w = 0.005 * domainLength
 
     extract_profile = (xv, yv, fv, x_st) -> begin
+        # Find all cells in the strip
         mask = abs.(xv .- x_st) .< strip_w
         !any(mask) && return Float64[], Float64[]
-        perm = sortperm(yv[mask])
-        return fv[mask][perm], yv[mask][perm]
+
+        # Use only cells from the nearest x-column to avoid
+        # mixing across bump slope (multiple wall heights)
+        dx = abs.(xv[mask] .- x_st)
+        dx_min = minimum(dx)
+        dx_tol = dx_min + 5e-5  # ~0.05mm tolerance
+        col = dx .<= dx_tol
+
+        y_col = yv[mask][col]
+        f_col = fv[mask][col]
+        # Shift to wall distance (subtract wall height, accounts for bump)
+        y_wall = minimum(y_col)
+        y_dist = y_col .- y_wall
+        perm = sortperm(y_dist)
+        return f_col[perm], y_dist[perm]
     end
 
     # ── Read experimental profiles ──
@@ -161,7 +175,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
 
         p = plot(;
             xlabel = L"w \ \mathrm{[m/s]}",
-            ylabel = k == 1 ? L"y \ \mathrm{[m]}" : "",
+            ylabel = k == 1 ? L"\mathrm{Wall \ distance \ [m]}" : "",
             ylims  = (0.0, 0.004),
             title  = latexstring("x/c = $(@sprintf("%.0f", xi_c*100))", raw"\%"),
             legend = :topleft,

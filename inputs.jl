@@ -8,6 +8,26 @@
 const inp = (
 
     # ======================================================================
+    # wallModulation — shared bump SHAPE (independent of placement coord)
+    # Per-case positions live in inp.DFP.wallBump and inp.TTCP.airfoilLE.wallBump
+    # ======================================================================
+    wallModulation = (
+        enabled = true,            # true to activate the bump
+        mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
+        shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
+        A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
+
+        # Sigmoidal shape parameters
+        p       = 10,              # front steepness exponent (≥3 for C2)
+        q       = 3,               # back steepness exponent (≥3 for C2)
+
+        # ESN shape parameters
+        epsilon = 0.0,             # skewness (-1 to 1)
+        R       = 50,              # base-to-height ratio [-]; R*A is the physical base width [m]
+        yTol    = 1e-5,            # [m] tail truncation tolerance
+    ),
+
+    # ======================================================================
     # DFP — DirectFlatPlateModule
     # ======================================================================
     DFP = (
@@ -37,29 +57,15 @@ const inp = (
         # Parallel
         nProcs = 8,
 
-        # Wall modulation — coordinates relative to domain origin (x=0 at inlet)
+        # Wall bump position — coordinates relative to domain origin (x=0 at inlet)
         # Physical distance from virtual LE = xInlet + x
-        wallModulation = (
-            enabled = true,            # true to activate the bump
-            mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
-            shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
-            A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
-
-            # Sigmoidal parameters (shape = :sigmoidal)
-            xStart  = 0.155,           # [m] start of bump (from domain inlet)
-            xPeak   = 0.157,           # [m] peak location (from domain inlet)
-            xEnd    = 0.165,           # [m] end of bump (from domain inlet)
-            p       = 10,              # front steepness exponent (≥3 for C2)
-            q       = 3,              # back steepness exponent (≥3 for C2)
-
-            # ESN parameters (shape = :esn)
-            xCenter = 0.15,            # [m] bump center (from domain inlet)
-            epsilon = 0.0,             # skewness (-1 to 1)
-            R       = 50,             # base-to-height ratio [-]
-            yTol    = 1e-5,           # [m] tail truncation tolerance
-
-            # Local refinement
-            bumpXrefine = 2,           # x-cell multiplier for blocks overlapping the bump
+        wallBump = (
+            # ESN center
+            xCenter = 0.08833,         # [m] bump center
+            # Sigmoidal extents
+            xStart  = 0.155,           # [m] start of bump
+            xPeak   = 0.157,           # [m] peak location
+            xEnd    = 0.165,           # [m] end of bump
         ),
 
         # Output settings
@@ -138,6 +144,22 @@ const inp = (
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
             exportHeight = 0.020,       # wall-normal from surface [m]
             wallExtrapolation = true,   # add wall point (u=v=w=0, p extrapolated) to output
+
+            # Suppress mapped-pressure noise in the BL on suction/pressure outlets:
+            # within `factor` × Blasius δ from the wall, the prescribed p is set
+            # constant equal to the value at the first face beyond that band.
+            clampOutletPressureBL       = true,
+            clampOutletPressureBLFactor = 2.0,
+
+            # Wall bump position on the airfoil upper surface (chord fraction)
+            wallBump = (
+                # ESN center
+                xiCenter = 0.15,       # x/c on chord; converted to arc-length s at evaluation
+                # Sigmoidal extents
+                xiStart  = 0.13,       # x/c
+                xiPeak   = 0.15,       # x/c
+                xiEnd    = 0.20,       # x/c
+            ),
         ),
 
         # ── Parallel ────────────────────────────────────────────────────

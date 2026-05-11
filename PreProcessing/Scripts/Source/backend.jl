@@ -245,7 +245,7 @@ Julia inputs.  The file is auto-generated and should not be edited by hand.
 """
 function write_flat_plate_input_param(case_dir::AbstractString)
     p = inp.DFP
-    wm = p.wallModulation
+    wm = merge(inp.wallModulation, p.wallBump)
 
     # Compute wall vertex y-displacements [mm] at the 7 block boundaries
     L = p.domainLength
@@ -257,28 +257,12 @@ function write_flat_plate_input_param(case_dir::AbstractString)
     gy = p.gridYfactor
 
     if wm.enabled && wm.mode == :single
-        # Bump extent: full (with blend zones) for vertices/polyLine
-        #              yTol-based for refinement boxes
-        if wm.shape == :sigmoidal
-            vbump_xs, vbump_xe = wm.xStart, wm.xEnd
-            rbump_xs, rbump_xe = wm.xStart, wm.xEnd
-        else
-            vbump_xs, vbump_xe = _esn_geometry_full(wm)  # includes blend
-            rbump_xs, rbump_xe = _esn_geometry(wm)        # yTol boundaries
-        end
         # Vertices: evaluate bump (returns 0 outside full extent naturally)
         yverts = [wall_bump(xv, wm) * 1000.0 for xv in xverts]  # mm
-        # Block x-cell counts: multiply by bumpXrefine for blocks overlapping the bump
-        bxr = wm.bumpXrefine
-        nx_final = [let xa = xverts[i]; xb = xverts[i+1]
-                        overlaps = !(xb <= rbump_xs || xa >= rbump_xe)
-                        round(Int, nx_base[i] * gx * (overlaps ? bxr : 1))
-                    end
-                    for i in 1:6]
     else
         yverts = zeros(7)
-        nx_final = [round(Int, nx_base[i] * gx) for i in 1:6]
     end
+    nx_final = [round(Int, nx_base[i] * gx) for i in 1:6]
 
     path = joinpath(case_dir, "constant", "inputParam")
     mkpath(dirname(path))

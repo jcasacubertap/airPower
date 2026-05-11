@@ -168,11 +168,13 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     " && decomposePar -force" *
                     " && mpirun -np $(inp.TTCP.nProcs) --oversubscribe simpleFoam -parallel" *
                     " && reconstructPar")
-                latest = read(`docker exec $(DOCKER_CONTAINER) bash -c
-                    "ls -1d $work/[0-9]* 2>/dev/null | sort -g | tail -1"`, String) |> strip
-                if !isempty(latest) && basename(latest) != "0"
-                    run(`docker cp $(DOCKER_CONTAINER):$latest $(airfoil_case)/`)
-                    @info "Copied time directory: $(basename(latest))"
+                times_str = read(`docker exec $(DOCKER_CONTAINER) bash -c
+                    "ls -1d $work/[0-9]* 2>/dev/null | sort -g"`, String)
+                for t in split(times_str, '\n')
+                    t = strip(t)
+                    (isempty(t) || basename(t) == "0") && continue
+                    run(`docker cp $(DOCKER_CONTAINER):$t $(airfoil_case)/`)
+                    @info "Copied time directory: $(basename(t))"
                 end
                 foam_exec(backend, airfoil_case, "rm -rf $work")
             else

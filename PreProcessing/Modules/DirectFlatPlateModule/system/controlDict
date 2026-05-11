@@ -115,7 +115,7 @@ functions
             // ── Wall extrapolation: add wall face centres with u=v=w=0 ──
             // p is extrapolated from the two nearest interior cells (2nd order)
             DynamicList<label> wallFaces;
-            scalarField wallP;
+            DynamicList<scalar> wallP;
             if (wallExtrap)
             {
                 label patchID = mesh.boundaryMesh().findPatchID("plate");
@@ -134,19 +134,20 @@ functions
                         scalar d1 = GREAT, d2 = GREAT;
                         label c1 = -1, c2 = -1;
                         double fx = faceCentres[fi].x();
+                        double fy = faceCentres[fi].y();  // wall face y (=0 flat, >0 bump)
 
                         forAll(cells, ci_idx)
                         {
                             label ci = cells[ci_idx];
                             // Same x-column: within half a cell width
-                            if (mag(C[ci].x() - fx) > 2e-3) continue;
-                            scalar dist = C[ci].y();  // wall-normal = y for flat plate
-                            if (dist < d1)
+                            if (mag(C[ci].x() - fx) > 5e-4) continue;
+                            scalar dist = C[ci].y() - fy;  // distance above wall face
+                            if (dist > 0 && dist < d1)
                             {
                                 d2 = d1; c2 = c1;
                                 d1 = dist; c1 = ci;
                             }
-                            else if (dist < d2)
+                            else if (dist > 0 && dist < d2)
                             {
                                 d2 = dist; c2 = ci;
                             }
@@ -155,10 +156,10 @@ functions
                         wallFaces.append(fi);
                         if (c1 >= 0 && c2 >= 0 && d2 > d1 + SMALL)
                         {
-                            // 2nd-order: linear extrapolation to y=0
+                            // 2nd-order: linear extrapolation to wall face y
                             scalar y1 = C[c1].y(), y2 = C[c2].y();
                             scalar p1 = p[c1],     p2 = p[c2];
-                            scalar pWall = p1 + (p2 - p1) * (0.0 - y1) / (y2 - y1);
+                            scalar pWall = p1 + (p2 - p1) * (fy - y1) / (y2 - y1);
                             wallP.append(pWall);
                         }
                         else if (c1 >= 0)

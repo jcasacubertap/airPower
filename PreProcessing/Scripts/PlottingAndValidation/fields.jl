@@ -1,6 +1,64 @@
 using DelimitedFiles, LaTeXStrings
 
 """
+    scatter_to_grid(x, y, f; nx, ny, fill_iters) → (xg, yg, F)
+
+Bin scattered cell-center data to a regular nx×ny grid, averaging samples that
+fall in the same bin. Empty bins are then filled by iterative neighbor-averaging
+(`fill_iters` passes), which closes free-stream gaps where cells are larger than
+a bin. `fill_iters` is capped so genuine no-data regions (e.g. airfoil interior)
+stay NaN and render as the plot background.
+"""
+function scatter_to_grid(x::Vector{Float64}, y::Vector{Float64}, f::Vector{Float64};
+                         nx::Int=600, ny::Int=300, fill_iters::Int=15)
+    x_lo, x_hi = extrema(x)
+    y_lo, y_hi = extrema(y)
+    dx_b = (x_hi - x_lo) / max(nx - 1, 1)
+    dy_b = (y_hi - y_lo) / max(ny - 1, 1)
+    xg = collect(range(x_lo, x_hi, length=nx))
+    yg = collect(range(y_lo, y_hi, length=ny))
+
+    F_sum = zeros(ny, nx)
+    F_cnt = zeros(Int, ny, nx)
+    @inbounds for k in eachindex(x)
+        i = clamp(round(Int, (x[k] - x_lo) / dx_b) + 1, 1, nx)
+        j = clamp(round(Int, (y[k] - y_lo) / dy_b) + 1, 1, ny)
+        F_sum[j, i] += f[k]
+        F_cnt[j, i] += 1
+    end
+
+    F = fill(NaN, ny, nx)
+    @inbounds for k in eachindex(F)
+        F_cnt[k] > 0 && (F[k] = F_sum[k] / F_cnt[k])
+    end
+
+    for _ in 1:fill_iters
+        any(isnan, F) || break
+        F_new = copy(F)
+        changed = false
+        @inbounds for j in 1:ny, i in 1:nx
+            isnan(F[j, i]) || continue
+            s = 0.0; c = 0
+            for dj in -1:1, di in -1:1
+                (di == 0 && dj == 0) && continue
+                ii = i + di; jj = j + dj
+                (1 <= ii <= nx && 1 <= jj <= ny) || continue
+                v = F[jj, ii]
+                isnan(v) && continue
+                s += v; c += 1
+            end
+            if c > 0
+                F_new[j, i] = s / c
+                changed = true
+            end
+        end
+        F = F_new
+        changed || break
+    end
+    return xg, yg, F
+end
+
+"""
     structured_reshape(x, y, f) → (xu, yu, F)
 
 Detect structured grid from cell-center coordinates and reshape field `f`
@@ -45,7 +103,8 @@ function plot_fields(case_path::AbstractString;
                      chord_mm::Union{Float64, Nothing}=nothing,
                      alpha_deg::Float64=-3.0,
                      x_center_mm::Float64=0.0,
-                     y_center_mm::Float64=0.0)
+                     y_center_mm::Float64=0.0,
+                     wm=nothing)
     csv_path = joinpath(case_path, "postProcessing", filename)
     if !isfile(csv_path)
         @warn "midPlane.csv not found at $csv_path"
@@ -85,7 +144,6 @@ function plot_fields(case_path::AbstractString;
     dx = maximum(x) - minimum(x)
     dy = maximum(y) - minimum(y)
     ar = (dx > 0 && dy > 0 && dx / dy > 5) ? :auto : :equal
-    ms = length(x) > 50_000 ? 1 : 2
 
     use_airfoil = chord_mm !== nothing
 
@@ -101,26 +159,6 @@ function plot_fields(case_path::AbstractString;
         end
     end
     colors = [:royalblue, :firebrick, :forestgreen, :darkorange, :purple, :teal]
-
-    common_sc = (
-        aspect_ratio    = ar,
-        colorbar        = true,
-        ylabel          = L"y \ \mathrm{[m]}",
-        xlabel          = L"x \ \mathrm{[m]}",
-        legend          = false,
-        framestyle      = :box,
-        markerstrokewidth = 0,
-        markersize      = ms,
-        markershape     = :circle,
-        tickfontsize    = 10,
-        guidefontsize   = 12,
-        titlefontsize   = 13,
-        left_margin     = 8Plots.mm,
-        bottom_margin   = 6Plots.mm,
-        right_margin    = 4Plots.mm,
-        top_margin      = 4Plots.mm,
-        dpi             = 200,
-    )
 
     common_prof = (
         framestyle     = :box,
@@ -195,8 +233,14 @@ function plot_fields(case_path::AbstractString;
         prof_ylims  = (minimum(y), minimum(y) + 0.25 * dy)
 
         extract_profile = (xv, yv, fv, x_st) -> begin
-            mask = abs.(xv .- x_st) .< strip_w_vert
-            !any(mask) && return Float64[], Float64[]
+            in_strip = abs.(xv .- x_st) .< strip_w_vert
+            !any(in_strip) && return Float64[], Float64[]
+            # Snap to the single x-column nearest x_st (avoid interleaving
+            # multiple columns when strip_w_vert spans more than one).
+            dxs = abs.(xv .- x_st)
+            dx_min = minimum(dxs[in_strip])
+            col_tol = max(1e-9, 0.01 * strip_w_vert)
+            mask = in_strip .& (dxs .<= dx_min + col_tol)
             perm = sortperm(yv[mask])
             return fv[mask][perm], yv[mask][perm]
         end
@@ -257,12 +301,25 @@ function plot_fields(case_path::AbstractString;
         end
 
         make_velocity_figure = (fv, comp_label, comp_latex, outname) -> begin
-            p_cont = scatter(x, y;
-                marker_z       = fv,
-                colorbar_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}"),
-                color          = :viridis,
-                common_sc...)
-            draw_station_lines!(p_cont)
+            cb_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}")
+            xg, yg, Fg = scatter_to_grid(x, y, fv; nx=700, ny=400, fill_iters=10)
+            y_lo, y_hi = yg[1], yg[end]
+            y_zoom_hi = y_lo + (y_hi - y_lo) / 8
+
+            make_panel = (ylims_p; force_auto_ar=false, show_cb_title=true) -> begin
+                panel = heatmap(xg, yg, Fg;
+                    common_hm...,
+                    colorbar_title = show_cb_title ? cb_title : "",
+                    color          = :viridis,
+                    xlims          = (xg[1], xg[end]),
+                    ylims          = ylims_p,
+                    aspect_ratio   = force_auto_ar ? :auto : ar)
+                draw_station_lines!(panel)
+                return panel
+            end
+
+            p_full = make_panel((y_lo, y_hi))
+            p_zoom = make_panel((y_lo, y_zoom_hi); force_auto_ar=true, show_cb_title=false)
 
             p_pr = plot(; xlabel=comp_latex, ylabel=prof_ylabel,
                 ylims=prof_ylims, legend=:outerright, common_prof...)
@@ -276,8 +333,9 @@ function plot_fields(case_path::AbstractString;
                       markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
-            fig = plot(p_cont, p_pr;
-                layout = @layout([a{0.55w} b{0.45w}]), size = (1300, 450))
+            fig = plot(p_full, p_zoom, p_pr;
+                layout = @layout([grid(2,1){0.55w} b{0.45w}]),
+                size = (1300, 450))
             outfile = joinpath(savedir, "$(outname)$(label).png")
             savefig(fig, outfile); @info "Saved: $outfile"
             return fig
@@ -288,17 +346,39 @@ function plot_fields(case_path::AbstractString;
         fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
         p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
     elseif use_scatter
-        # Deformed DFP (bump): scatter + vertical strip profiles
+        # Deformed DFP (bump): gridded heatmap + vertical strip profiles
+        bump_active = wm !== nothing && hasproperty(wm, :enabled) && wm.enabled
         make_velocity_figure = (fv, comp_label, comp_latex, outname) -> begin
-            p_cont = scatter(x, y;
-                marker_z       = fv,
-                colorbar_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}"),
-                color          = :viridis,
-                common_sc...)
-            for (k, st) in enumerate(prof_stations)
-                vline!(p_cont, [st]; color=colors[mod1(k, length(colors))],
-                       linestyle=:dash, linewidth=1.2, label=false)
+            cb_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}")
+            xg, yg, Fg = scatter_to_grid(x, y, fv; nx=700, ny=300, fill_iters=20)
+            y_lo, y_hi = yg[1], yg[end]
+            y_zoom_hi = y_lo + (y_hi - y_lo) / 8
+
+            make_panel = (ylims_p; show_cb_title=true) -> begin
+                panel = heatmap(xg, yg, Fg;
+                    common_hm...,
+                    colorbar_title = show_cb_title ? cb_title : "",
+                    color          = :viridis,
+                    xlims          = (xg[1], xg[end]),
+                    ylims          = ylims_p)
+                if bump_active
+                    xs_b = collect(range(xg[1], xg[end], length=600))
+                    ys_b = [wall_bump(xi, wm) for xi in xs_b]
+                    plot!(panel,
+                          [xs_b; reverse(xs_b)],
+                          [ys_b; fill(yg[1], length(xs_b))];
+                          seriestype=:shape, fillcolor=:white,
+                          linecolor=:white, linewidth=0, label=false)
+                end
+                for (k, st) in enumerate(prof_stations)
+                    vline!(panel, [st]; color=colors[mod1(k, length(colors))],
+                           linestyle=:dash, linewidth=1.2, label=false)
+                end
+                return panel
             end
+
+            p_full = make_panel((y_lo, y_hi))
+            p_zoom = make_panel((y_lo, y_zoom_hi); show_cb_title=false)
 
             p_pr = plot(; xlabel=comp_latex, ylabel=prof_ylabel,
                 ylims=prof_ylims, legend=:outerright, common_prof...)
@@ -312,8 +392,9 @@ function plot_fields(case_path::AbstractString;
                       markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
-            fig = plot(p_cont, p_pr;
-                layout = @layout([a{0.55w} b{0.45w}]), size = (1300, 450))
+            fig = plot(p_full, p_zoom, p_pr;
+                layout = @layout([grid(2,1){0.55w} b{0.45w}]),
+                size = (1300, 450))
             outfile = joinpath(savedir, "$(outname)$(label).png")
             savefig(fig, outfile); @info "Saved: $outfile"
             return fig
@@ -323,16 +404,85 @@ function plot_fields(case_path::AbstractString;
         fig_v = make_velocity_figure(v, "v", L"v \ \mathrm{[m/s]}", "vField")
         fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
         p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
+
+        # Bump-centric profile grid (4 fields × 5 stations spaced by bump width)
+        if bump_active
+            if wm.shape == :esn
+                bump_xs_b, bump_xe_b = _esn_geometry_full(wm)
+                xc_bump = wm.xCenter
+            else
+                bump_xs_b, bump_xe_b = wm.xStart, wm.xEnd
+                xc_bump = (wm.xStart + wm.xEnd) / 2
+            end
+            bump_w_b = bump_xe_b - bump_xs_b
+            bump_offsets = [-1.0, -0.5, 0.0, 0.5, 1.0]
+            bump_x_stns  = [xc_bump + o * bump_w_b for o in bump_offsets]
+            bump_titles  = [latexstring(@sprintf("x = %.4f \\ \\mathrm{m}", st))
+                            for st in bump_x_stns]
+
+            y_b_lo = minimum(y); y_b_hi = maximum(y)
+            bump_ylims = (0.0, (y_b_hi - y_b_lo) / 8)
+            wd_ylabel  = L"\mathrm{Wall\ distance}\ [\mathrm{m}]"
+
+            bump_fields = [
+                (u, L"u \ \mathrm{[m/s]}"),
+                (v, L"v \ \mathrm{[m/s]}"),
+                (w, L"w \ \mathrm{[m/s]}"),
+            ]
+
+            bump_panels = []
+            for (i, (fv, comp_latex)) in enumerate(bump_fields)
+                for (k, st) in enumerate(bump_x_stns)
+                    fprof, yprof = extract_profile(x, y, fv, st)
+                    y_wall_st = wall_bump(st, wm)
+                    wd_prof = yprof .- y_wall_st
+                    p_sub = plot(;
+                        common_prof...,
+                        xlabel = comp_latex,
+                        ylabel = k == 1 ? wd_ylabel : "",
+                        title  = i == 1 ? bump_titles[k] : "",
+                        ylims  = bump_ylims,
+                        legend = false)
+                    if !isempty(fprof)
+                        plot!(p_sub, fprof, wd_prof;
+                              color             = :royalblue,
+                              marker            = :circle,
+                              markersize        = 3,
+                              markercolor       = :royalblue,
+                              markerstrokecolor = :black,
+                              markerstrokewidth = 0.5)
+                    end
+                    push!(bump_panels, p_sub)
+                end
+            end
+
+            fig_bump = plot(bump_panels...;
+                layout = (3, 5), size = (1500, 800), dpi = 200)
+            outfile = joinpath(savedir, "bumpProfiles$(label).png")
+            savefig(fig_bump, outfile)
+            @info "Saved: $outfile"
+        end
     else
         make_velocity_figure = (fv_mat, comp_label, comp_latex, outname) -> begin
-            p_cont = heatmap(xu, yu, fv_mat;
-                colorbar_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}"),
-                color          = :viridis,
-                common_hm...)
-            for (k, si) in enumerate(prof_stations_idx)
-                vline!(p_cont, [xu[si]]; color=colors[mod1(k, length(colors))],
-                       linestyle=:dash, linewidth=1.2, label=false)
+            cb_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}")
+            y_lo, y_hi = minimum(yu), maximum(yu)
+            y_zoom_hi = y_lo + (y_hi - y_lo) / 8
+
+            make_panel = (ylims_p; show_cb_title=true) -> begin
+                panel = heatmap(xu, yu, fv_mat;
+                    common_hm...,
+                    colorbar_title = show_cb_title ? cb_title : "",
+                    color          = :viridis,
+                    ylims          = ylims_p)
+                for (k, si) in enumerate(prof_stations_idx)
+                    vline!(panel, [xu[si]]; color=colors[mod1(k, length(colors))],
+                           linestyle=:dash, linewidth=1.2, label=false)
+                end
+                return panel
             end
+
+            p_full = make_panel((y_lo, y_hi))
+            p_zoom = make_panel((y_lo, y_zoom_hi); show_cb_title=false)
 
             p_pr = plot(; xlabel=comp_latex, ylabel=prof_ylabel,
                 ylims=prof_ylims, legend=:outerright, common_prof...)
@@ -345,8 +495,9 @@ function plot_fields(case_path::AbstractString;
                       markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
-            fig = plot(p_cont, p_pr;
-                layout = @layout([a{0.55w} b{0.45w}]), size = (1300, 450))
+            fig = plot(p_full, p_zoom, p_pr;
+                layout = @layout([grid(2,1){0.55w} b{0.45w}]),
+                size = (1300, 450))
             outfile = joinpath(savedir, "$(outname)$(label).png")
             savefig(fig, outfile); @info "Saved: $outfile"
             return fig
