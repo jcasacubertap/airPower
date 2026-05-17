@@ -22,7 +22,7 @@ gr()
 default(fontfamily = "Computer Modern")
 
 # ── Read inputs ───────────────────────────────────────────────────────
-wm = merge(inp.wallModulation, inp.DFP.wallBump)
+wm = merge(inp.wallModulation, inp.DFP.wallModulation)
 
 if !wm.enabled
     @info "wallModulation is disabled in inputs.jl — plotting with current parameters anyway"

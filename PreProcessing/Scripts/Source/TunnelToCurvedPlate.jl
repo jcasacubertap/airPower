@@ -9,7 +9,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
     tunnel_case   = joinpath(tunnel_to_curved, "TunnelCase")
     airfoil_case  = joinpath(tunnel_to_curved, "AirfoilLECase")
-    generate_grid = joinpath(airfoil_case, "generateGrid.jl")
+    generate_grid = joinpath(root, "PreProcessing", "Scripts", "SelfRunning", "generateGrid.jl")
     map_script    = joinpath(tunnel_to_curved, "mapTunnelToAirfoilLE.jl")
 
     airfoil_data_dir = joinpath(root, "PreProcessing", "InputOutput", "AirfoilGeometryData")
@@ -125,6 +125,18 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             end
             @info "Meshing AirfoilLECase..."
             foam_exec(backend, airfoil_case, "blockMesh")
+
+            # Sanity-check plot: original vs bumped upper surface (active when
+            # inp.wallModulation.enabled = true; generateGrid.jl wrote
+            # bumpCheck.csv inside the airfoil case dir).
+            wm = merge(inp.wallModulation, inp.TTCP.airfoilLE.wallModulation)
+            if wm.enabled
+                plotting_dir = joinpath(root, "PreProcessing", "InputOutput",
+                                        "Plotting", "TunnelToCurvedPlate")
+                plot_airfoil_bump_check(;
+                    savedir  = plotting_dir,
+                    csv_path = joinpath(airfoil_case, "bumpCheck.csv"))
+            end
         end,
 
         :runTunnel => () -> begin

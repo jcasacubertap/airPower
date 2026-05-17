@@ -129,7 +129,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             write_flat_plate_input_param(case_dir)
             @info "Meshing DirectFlatPlate..."
 
-            wm = merge(inp.wallModulation, inp.DFP.wallBump)
+            wm = merge(inp.wallModulation, inp.DFP.wallModulation)
             refine_cmds = ""
             # Note: topoSet/refineMesh disabled — it distorts the bump geometry
             # (face centres are averaged, not re-evaluated on the polyLine).
@@ -205,7 +205,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
         :viz => () -> begin
             res    = plot_residuals(case_dir; savedir=plotting_dir, label="DirectFlatPlate")
             fields = plot_fields(case_dir; savedir=plotting_dir,
-                                 wm=merge(inp.wallModulation, inp.DFP.wallBump))
+                                 wm=merge(inp.wallModulation, inp.DFP.wallModulation))
             wval   = nothing
             if inp.VAL.valPlot
                 wval = plot_dfp_w_validation(case_dir; savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case)

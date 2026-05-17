@@ -45,6 +45,11 @@ end
 
 include(find_ancestor_file(@__DIR__, "inputs.jl"))
 
+# Pure bump-shape math (also used by backend.jl / wallModulationTopology.jl)
+let root = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
+    include(joinpath(root, "PreProcessing", "Scripts", "Source", "wallModulation.jl"))
+end
+
 # ═══════════════════════════════════════════════════════════════════════
 #  SECTION 1 — AIRFOIL DATA  (ξ = x/c,  η = y/c,  LE → TE)
 # ═══════════════════════════════════════════════════════════════════════
@@ -386,6 +391,148 @@ function equal_arc_xis(xi_from::Float64, xi_to::Float64, n_seg::Int,
     end
     push!(result, xi_to)
     return result
+end
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SECTION 3b — UPPER-SURFACE WALL MODULATION (bump)
+# ═══════════════════════════════════════════════════════════════════════
+# Position fields (xiCenter, xiStart, ...) live in chord-fraction units.
+# At init time they are converted to upper-surface arc-length s [m] so the
+# pure shape functions in wallModulation.jl (which expect a single 1-D
+# coordinate) can be used unchanged.
+
+# Upper-surface arc-length table (xi → s [mm], dense).  Built once after
+# load_params() so CHORD is set.
+const S_TABLE_N  = 5001
+const S_TABLE_XI = Vector{Float64}(undef, 0)
+const S_TABLE_S  = Vector{Float64}(undef, 0)
+
+# Compiled (shape + s-space position) wm.  `nothing` means bump disabled.
+const BUMP_WM      = Ref{Any}(nothing)
+const BUMP_ENABLED = Ref{Bool}(false)
+
+"""
+Build the cumulative upper-surface arc-length table (mm) via dense sampling.
+Must be called after `load_params()` (CHORD must be set).
+"""
+function build_s_table()
+    empty!(S_TABLE_XI); empty!(S_TABLE_S)
+    resize!(S_TABLE_XI, S_TABLE_N)
+    resize!(S_TABLE_S,  S_TABLE_N)
+    S_TABLE_XI[1] = 0.0
+    S_TABLE_S[1]  = 0.0
+    p_prev = upper_pt_cubic(0.0)
+    for i in 2:S_TABLE_N
+        xi = (i - 1) / (S_TABLE_N - 1)
+        p = upper_pt_cubic(xi)
+        ds = sqrt((p[1] - p_prev[1])^2 + (p[2] - p_prev[2])^2)  # mm
+        S_TABLE_XI[i] = xi
+        S_TABLE_S[i]  = S_TABLE_S[i-1] + ds
+        p_prev = p
+    end
+end
+
+"""Upper-surface arc length from LE to `xi` [mm], linearly interpolated."""
+function s_upper_mm(xi::Float64)::Float64
+    xi <= 0.0 && return 0.0
+    xi >= 1.0 && return S_TABLE_S[end]
+    idx = searchsortedlast(S_TABLE_XI, xi)
+    idx = clamp(idx, 1, length(S_TABLE_XI) - 1)
+    t = (xi - S_TABLE_XI[idx]) / (S_TABLE_XI[idx+1] - S_TABLE_XI[idx])
+    return (1.0 - t) * S_TABLE_S[idx] + t * S_TABLE_S[idx+1]
+end
+
+s_upper_m(xi::Float64)::Float64 = s_upper_mm(xi) / 1000.0
+
+"""
+Resolve `inp.wallModulation` + `inp.TTCP.airfoilLE.wallModulation` into a
+NamedTuple of (shape params) ∪ (xCenter/xStart/xPeak/xEnd in [m] of
+upper-surface arc length).  Runs all halt-on-error sanity checks.
+"""
+function init_bump_module()
+    raw = merge(inp.wallModulation, inp.TTCP.airfoilLE.wallModulation)
+    BUMP_ENABLED[] = raw.enabled
+    raw.enabled || (BUMP_WM[] = nothing; return)
+
+    # --- (2) Input validation ---
+    raw.mode == :single || error(
+        "airfoilLE wall bump: only mode = :single is supported (got :$(raw.mode))")
+    for f in (:xiCenter, :xiStart, :xiPeak, :xiEnd)
+        v = getfield(raw, f)
+        (0.0 < v < 1.0) || error(
+            "airfoilLE wall bump: $f = $v must be in (0, 1)")
+    end
+    if raw.shape == :sigmoidal
+        (raw.xiStart < raw.xiPeak < raw.xiEnd) || error(
+            "airfoilLE wall bump (sigmoidal): require xiStart < xiPeak < xiEnd " *
+            "(got $(raw.xiStart), $(raw.xiPeak), $(raw.xiEnd))")
+    end
+
+    # Convert chord-fraction positions to arc length [m]
+    phys = merge(raw, (
+        xCenter = s_upper_m(raw.xiCenter),
+        xStart  = s_upper_m(raw.xiStart),
+        xPeak   = s_upper_m(raw.xiPeak),
+        xEnd    = s_upper_m(raw.xiEnd),
+    ))
+    BUMP_WM[] = phys
+
+    # --- (1) Bump extent must fit inside the meshed upper surface ---
+    bump_lo, bump_hi = phys.shape == :esn ? _esn_geometry_full(phys) :
+                                            (phys.xStart, phys.xEnd)
+    s_max = s_upper_m(XI_SUCTION_OUTLET)
+    bump_lo >= 0.0 || error(
+        "airfoilLE wall bump: full extent reaches s = $(round(bump_lo, sigdigits=4)) [m] " *
+        "which crosses the leading edge (s = 0). Move the bump downstream " *
+        "or reduce its width.")
+    bump_hi <= s_max || error(
+        "airfoilLE wall bump: full extent reaches s = $(round(bump_hi, sigdigits=4)) [m] " *
+        "which crosses the upper-surface outlet (s = $(round(s_max, sigdigits=4)) [m] " *
+        "at xiSuctionOutlet = $XI_SUCTION_OUTLET). Move the bump upstream " *
+        "or reduce its width.")
+
+    @info "airfoilLE wall bump active" shape=phys.shape A_mm=phys.A*1000 s_lo_m=bump_lo s_hi_m=bump_hi
+end
+
+"""
+Wall-normal offset (mm) to add to the upper-surface point at `xi`.
+Returns 0 if the bump is disabled or `xi` is outside the bump support.
+"""
+function bump_offset_mm(xi::Float64)::Float64
+    BUMP_ENABLED[] || return 0.0
+    wm = BUMP_WM[]
+    wm === nothing && return 0.0
+    s_m = s_upper_m(xi)
+    h_m = wall_bump(s_m, wm)
+    return h_m * 1000.0
+end
+
+"""
+Write a dense (xi, x_orig, y_orig, x_bumped, y_bumped, s, h) sample of the
+upper surface to `<case_dir>/bumpCheck.csv` (all positions in mm).  Read
+back by the orchestrator's plotting step to produce
+`airfoilWallModulationCheck.png`.  No-op when the bump is disabled.
+"""
+function write_bump_check_csv(case_dir::AbstractString)
+    BUMP_ENABLED[] || return
+    mkpath(case_dir)
+    out_path = joinpath(case_dir, "bumpCheck.csv")
+
+    N = 4000
+    open(out_path, "w") do io
+        println(io, "xi,x_orig_mm,y_orig_mm,x_bumped_mm,y_bumped_mm,s_mm,h_mm")
+        for i in 1:N
+            xi = XI_SUCTION_OUTLET * (i - 1) / (N - 1)
+            px, py = upper_pt_cubic(xi)
+            nx, ny = surface_normal(max(xi, 1e-6), :upper)
+            b = bump_offset_mm(xi)               # wall-normal offset [mm] = h
+            s = s_upper_mm(xi)                   # arc length from LE [mm]
+            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
+                    xi, px, py, px + b * nx, py + b * ny, s, b)
+        end
+    end
+    @info "Wrote bump-check samples" path=out_path
 end
 
 
@@ -807,10 +954,20 @@ function compute_vertices(sts::Vector{Station})::Vector{Vertex}
 
     for (ip, zval) in enumerate([-Z_WIDTH/2, Z_WIDTH/2])       # front=1, back=2
         for H in [0.0, H_BL, H_BL + H_FAR]                    # surface, mid, outer
+            on_wall = H < 1e-12
             for st in sts
-                push!(verts, Vertex(st.px + H * st.nx,
-                                    st.py + H * st.ny,
-                                    zval))
+                # Only the wall layer (H=0) of upper-surface stations gets
+                # bumped.  H>0 layers stay on the un-perturbed offset surface.
+                if on_wall && st.side == :upper
+                    b = bump_offset_mm(st.xi)
+                    push!(verts, Vertex(st.px + b * st.nx,
+                                        st.py + b * st.ny,
+                                        zval))
+                else
+                    push!(verts, Vertex(st.px + H * st.nx,
+                                        st.py + H * st.ny,
+                                        zval))
+                end
             end
         end
     end
@@ -1039,16 +1196,25 @@ function spline_between(sts::Vector{Station}, si::Int, sj::Int,
     # so the mismatch is only at the other vertex (~0.06mm at xi≈0.01).
     # Always use LINEAR normals — cubic normals oscillate too much
     # (up to ±5° / 24mm at H=250) due to Lagrange stencil shifts.
+    on_wall = H < 1e-12
     pts = NTuple{3,Float64}[]
     for xi in xi_interior
         if on_lower
             nx, ny = surface_normal(max(xi, 1e-6), :lower)
             px, py = lower_pt_cubic(xi)
+            push!(pts, (px + H * nx, py + H * ny, zval))
         else
             nx, ny = surface_normal(max(xi, 1e-6), :upper)
             px, py = upper_pt_cubic(xi)
+            if on_wall
+                # Bump the wall knot; outer-radial knots stay on the
+                # un-perturbed offset surface (matches compute_vertices).
+                b = bump_offset_mm(xi)
+                push!(pts, (px + b * nx, py + b * ny, zval))
+            else
+                push!(pts, (px + H * nx, py + H * ny, zval))
+            end
         end
-        push!(pts, (px + H * nx, py + H * ny, zval))
     end
     return pts
 end
@@ -1305,7 +1471,16 @@ function main()
     # 0. Read parameters from system/inputDomain
     load_params()
 
-    outfile = length(ARGS) ≥ 1 ? ARGS[1] : joinpath(@__DIR__, "system", "blockMeshDict")
+    # Default targets resolve to the OpenFOAM case dir (pwd() when invoked
+    # via run_julia_subprocess(...; dir=airfoil_case)), so this script no
+    # longer has to live inside the case.
+    case_dir = pwd()
+    outfile  = length(ARGS) ≥ 1 ? ARGS[1] : joinpath(case_dir, "system", "blockMeshDict")
+
+    # 0b. Build upper-surface arc-length table and resolve wall bump
+    build_s_table()
+    init_bump_module()
+    write_bump_check_csv(case_dir)
 
     # 1. Build C-path stations
     sts = build_stations()

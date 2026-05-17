@@ -9,7 +9,7 @@ const inp = (
 
     # ======================================================================
     # wallModulation — shared bump SHAPE (independent of placement coord)
-    # Per-case positions live in inp.DFP.wallBump and inp.TTCP.airfoilLE.wallBump
+    # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
         enabled = true,            # true to activate the bump
@@ -57,9 +57,10 @@ const inp = (
         # Parallel
         nProcs = 8,
 
-        # Wall bump position — coordinates relative to domain origin (x=0 at inlet)
-        # Physical distance from virtual LE = xInlet + x
-        wallBump = (
+        # Wall modulation position — coordinates relative to domain origin (x=0 at inlet)
+        # Physical distance from virtual LE = xInlet + x.
+        # Shape parameters (A, R, shape, etc.) live in the top-level inp.wallModulation.
+        wallModulation = (
             # ESN center
             xCenter = 0.08833,         # [m] bump center
             # Sigmoidal extents
@@ -151,8 +152,9 @@ const inp = (
             clampOutletPressureBL       = true,
             clampOutletPressureBLFactor = 2.0,
 
-            # Wall bump position on the airfoil upper surface (chord fraction)
-            wallBump = (
+            # Wall modulation position on the airfoil upper surface (chord fraction).
+            # Shape parameters (A, R, shape, etc.) live in the top-level inp.wallModulation.
+            wallModulation = (
                 # ESN center
                 xiCenter = 0.15,       # x/c on chord; converted to arc-length s at evaluation
                 # Sigmoidal extents

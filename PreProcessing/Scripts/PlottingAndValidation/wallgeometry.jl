@@ -233,3 +233,142 @@ function plot_wall_geometry(case_path::AbstractString;
     @info "Saved: $outfile"
     return fig
 end
+
+"""
+    plot_airfoil_bump_check(savedir; csv_path)
+
+Read the (xi, x_orig, y_orig, x_bumped, y_bumped, s, h) samples written by
+generateGrid.jl when the wall bump is active and produce a three-panel figure:
+    • top:    full upper-surface contour with both curves overlaid
+    • middle: zoom around the bump region
+    • bottom: wall-normal elevation h(s) of the bumped surface relative to
+              the original, with peak height and width annotated
+
+Returns the figure, or `nothing` if `bumpCheck.csv` is missing (e.g. bump
+was disabled when meshAirfoil ran).
+"""
+function plot_airfoil_bump_check(; savedir::AbstractString,
+                                   csv_path::AbstractString)
+    if !isfile(csv_path)
+        @warn "bumpCheck.csv not found — skipping airfoil bump check plot" path=csv_path
+        return nothing
+    end
+    mkpath(savedir)
+
+    raw = readdlm(csv_path, ','; skipstart=1)
+    xi_arr = Float64.(raw[:, 1])             # chord fraction
+    x_orig = Float64.(raw[:, 2]) ./ 1000.0   # mm → m
+    y_orig = Float64.(raw[:, 3]) ./ 1000.0
+    x_bump = Float64.(raw[:, 4]) ./ 1000.0
+    y_bump = Float64.(raw[:, 5]) ./ 1000.0
+    s_arr  = Float64.(raw[:, 6])             # [mm]
+    h_arr  = Float64.(raw[:, 7])             # [mm]
+
+    # Locate the bump support by point-wise displacement
+    disp = hypot.(x_bump .- x_orig, y_bump .- y_orig)
+    idx_bump = findall(d -> d > 1e-9, disp)
+
+    common = (
+        aspect_ratio = :equal,
+        xlabel       = L"x \ \mathrm{[m]}",
+        ylabel       = L"y \ \mathrm{[m]}",
+        framestyle   = :box,
+        grid         = true,
+        gridalpha    = 0.3,
+        tickfontsize   = 10,
+        guidefontsize  = 12,
+        legendfontsize = 9,
+        left_margin    = 8Plots.mm,
+        bottom_margin  = 6Plots.mm,
+        right_margin   = 4Plots.mm,
+        top_margin     = 4Plots.mm,
+        dpi            = 200,
+    )
+
+    p_full = plot(x_orig, y_orig;
+        label = "Original upper surface", color = :black, linewidth = 3,
+        legend = :topright, title = "Full upper surface", titlefontsize = 11,
+        common...)
+    plot!(p_full, x_bump, y_bump;
+        label = "Bumped upper surface", color = :firebrick, linewidth = 1)
+
+    if isempty(idx_bump)
+        @warn "bumpCheck.csv contains no perturbed samples — bump effectively zero"
+        fig = p_full
+    else
+        # Zoom: extend 5× the bump span on each side, but no smaller than 10×
+        # peak displacement in y so the bump shape is clearly visible.
+        i_lo = max(1, first(idx_bump))
+        i_hi = min(length(disp), last(idx_bump))
+        x_b_lo, x_b_hi = extrema(x_orig[i_lo:i_hi])
+        bump_x_span = x_b_hi - x_b_lo
+        peak_disp   = maximum(disp[i_lo:i_hi])
+        pad_x = 0.5 * bump_x_span
+        pad_y = max(0.5 * bump_x_span, 10 * peak_disp)
+        y_b_mid = 0.5 * (minimum(y_orig[i_lo:i_hi]) + maximum(y_orig[i_lo:i_hi]))
+        xlims_zoom = (x_b_lo - pad_x, x_b_hi + pad_x)
+        ylims_zoom = (y_b_mid - pad_y, y_b_mid + pad_y)
+
+        p_zoom = plot(x_orig, y_orig;
+            label = "Original upper surface", color = :black, linewidth = 3,
+            legend = :topright, title = "Bump region zoom", titlefontsize = 11,
+            xlims = xlims_zoom, ylims = ylims_zoom,
+            aspect_ratio = :auto,
+            xlabel = L"x \ \mathrm{[m]}", ylabel = L"y \ \mathrm{[m]}",
+            framestyle = :box, grid = true, gridalpha = 0.3,
+            tickfontsize = 10, guidefontsize = 12, legendfontsize = 9,
+            left_margin = 8Plots.mm, bottom_margin = 6Plots.mm,
+            right_margin = 4Plots.mm, top_margin = 4Plots.mm, dpi = 200)
+        plot!(p_zoom, x_bump, y_bump;
+            label = "Bumped upper surface", color = :firebrick, linewidth = 1)
+
+        # Third panel: wall-normal elevation h(s) of the bumped surface
+        # relative to the original.  Convert s [mm] → s [m] for display.
+        i_peak_arr = argmax(abs.(h_arr))
+        peak_h_mm  = h_arr[i_peak_arr]              # signed peak (handles depressions)
+        peak_xi    = xi_arr[i_peak_arr]             # chord fraction at the peak
+        bump_width_mm = s_arr[last(idx_bump)] - s_arr[first(idx_bump)]
+        s_pad = 0.5 * bump_width_mm
+        s_lo  = max(0.0, s_arr[first(idx_bump)] - s_pad)
+        s_hi  = s_arr[last(idx_bump)] + s_pad
+        annot_text = @sprintf("h_max = %.3f mm   width = %.2f mm   (x/c) at peak = %.4f",
+                              peak_h_mm, bump_width_mm, peak_xi)
+
+        p_h = plot(s_arr ./ 1000.0, h_arr;
+            label = false, color = :firebrick, linewidth = 1.5,
+            title = "Wall-normal elevation:  $annot_text",
+            titlefontsize = 11,
+            xlims = (s_lo / 1000.0, s_hi / 1000.0),
+            xlabel = L"s \ \mathrm{[m]}",
+            ylabel = L"h \ \mathrm{[mm]}",
+            framestyle = :box, grid = true, gridalpha = 0.3,
+            aspect_ratio = :auto,
+            tickfontsize = 10, guidefontsize = 12,
+            left_margin = 8Plots.mm, bottom_margin = 6Plots.mm,
+            right_margin = 4Plots.mm, top_margin = 4Plots.mm, dpi = 200)
+        hline!(p_h, [0.0]; color = :black, linewidth = 3, label = false)
+
+        # yTol-truncated bounds (dashed black) — first/last s where |h| > yTol
+        yTol_mm = inp.wallModulation.yTol * 1000.0
+        idx_tol = findall(x -> abs(x) > yTol_mm, h_arr)
+        if !isempty(idx_tol)
+            s_tol_lo_m = s_arr[first(idx_tol)] / 1000.0
+            s_tol_hi_m = s_arr[last(idx_tol)]  / 1000.0
+            vline!(p_h, [s_tol_lo_m, s_tol_hi_m];
+                color = :black, linestyle = :dash, linewidth = 1, label = false)
+        end
+
+        # Real arc-length center (dotted black) — peak of |h|
+        i_peak     = argmax(abs.(h_arr))
+        s_center_m = s_arr[i_peak] / 1000.0
+        vline!(p_h, [s_center_m];
+            color = :black, linestyle = :dot, linewidth = 1, label = false)
+
+        fig = plot(p_full, p_zoom, p_h; layout = grid(3, 1), size = (900, 1100))
+    end
+
+    outfile = joinpath(savedir, "airfoilWallModulationCheck.png")
+    savefig(fig, outfile)
+    @info "Saved: $outfile"
+    return fig
+end
