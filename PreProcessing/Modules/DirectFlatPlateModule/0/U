@@ -384,6 +384,30 @@ boundaryField
 		    // Apply to patch faces
 		    const scalar y0wall = 0.0;
 
+		    // Sanity check: the FSK ODE was integrated up to η = maxetaglobal.
+		    // In physical units this caps at y_max = maxetaglobal / etaScale.
+		    // If the inlet patch reaches higher, the interp1(η) lookup returns
+		    // the asymptotic plateau (≈ 1) but may carry numerical noise that
+		    // produces unphysical inflow values at the domain top — abort.
+		    scalar maxYOnPatch = 0.0;
+		    forAll(Cf, fI)
+		    {
+		        const scalar y = Cf[fI].component(nAxis) - y0wall;
+		        if (y > maxYOnPatch) maxYOnPatch = y;
+		    }
+		    const scalar yMaxAllowed = maxetaglobal / max(etaScale, eps);
+		    if (maxYOnPatch > yMaxAllowed)
+		    {
+		        FatalErrorInFunction
+		            << "FSC inlet: inlet patch extends to y = " << maxYOnPatch
+		            << " m, exceeding the FSK similarity domain"
+		            << " (maxetaglobal = " << maxetaglobal
+		            << " → y_max_allowed = " << yMaxAllowed << " m)." << nl
+		            << "Either decrease the domain height or increase"
+		            << " maxetaglobal in 0/U." << nl
+		            << abort(FatalError);
+		    }
+
 		    forAll(Ubf, fI)
 		    {
 		        const scalar y = (Cf[fI].component(nAxis) - y0wall);
@@ -425,14 +449,15 @@ boundaryField
 			    {
 				Foam::OFstream os(this->db().time().path()/"FSC_inletProfile.dat");
 				os.setf(std::ios::scientific); os.precision(8);
-				os << "# y   ux   uz\n";
+				os << "# y   ux   uy   uz\n";
 
 				forAll(Ubf, i)
 				{
 				    const scalar y  = max(0.0, Cf[i].component(nAxis) - y0);
 				    const scalar ux = Ubf[i].component(0);         // streamwise (x)
+				    const scalar uy = Ubf[i].component(nAxis);     // wall-normal (y)
 				    const scalar uz = Ubf[i].component(spanAxis);  // spanwise
-				    os << y << "  " << ux << "  " << uz << "\n";
+				    os << y << "  " << ux << "  " << uy << "  " << uz << "\n";
 				}
 				dumped = true;
 			    }
