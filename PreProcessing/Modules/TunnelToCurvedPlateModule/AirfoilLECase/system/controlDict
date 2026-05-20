@@ -141,7 +141,7 @@ functions
             // ── Final cell list (full or partial) ──
             DynamicList<label> cells;
             DynamicList<scalar> localWall;
-            DynamicList<scalar> localWallQ;  // wall quantities: x, p, cf, yplus per face
+            DynamicList<scalar> localWallQ;  // wall quantities: x, s, p, cf, yplus per face
             DynamicList<scalar> localWallExtrap;  // wall extrap: x,y,z,0,0,0,p per face
 
             if (mode == "partial")
@@ -238,6 +238,42 @@ functions
                 double tOutX =  nOutY;
                 double tOutY = -nOutX;
 
+                // ── Precompute upper-surface reference curve for arclength lookup ──
+                // Sample xi ∈ [0,1] on a fine grid; cache (x_ref, y_ref) in
+                // global coords and the cumulative arclength s_ref. The
+                // resolution matches the Julia post-processor (≈ 0.15 mm).
+                const int N_REF = 4001;
+                scalarList xRef(N_REF), yRef(N_REF), sRef(N_REF);
+                {
+                    double xa, ya;
+                    toGlobal(0.0, etaUpper(0.0), xa, ya);
+                    xRef[0] = xa; yRef[0] = ya; sRef[0] = 0.0;
+                    for (int k = 1; k < N_REF; ++k)
+                    {
+                        const double xiK = scalar(k) / scalar(N_REF - 1);
+                        double xb, yb;
+                        toGlobal(xiK, etaUpper(xiK), xb, yb);
+                        xRef[k] = xb; yRef[k] = yb;
+                        const double dxk = xb - xa, dyk = yb - ya;
+                        sRef[k] = sRef[k-1] + std::sqrt(dxk*dxk + dyk*dyk);
+                        xa = xb; ya = yb;
+                    }
+                }
+
+                // Arclength at the projection of (fx, fy) on the upper surface.
+                auto arclengthOf = [&](double fx, double fy) -> double
+                {
+                    int bestk = 0;
+                    double bestd = GREAT;
+                    for (int k = 0; k < N_REF; ++k)
+                    {
+                        const double dx = fx - xRef[k], dy = fy - yRef[k];
+                        const double d2 = dx*dx + dy*dy;
+                        if (d2 < bestd) { bestd = d2; bestk = k; }
+                    }
+                    return sRef[bestk];
+                };
+
                 // ── Get airfoil patch face centres & normals ──
                 label patchID = mesh.boundaryMesh().findPatchID("airfoil");
                 if (patchID < 0)
@@ -333,6 +369,7 @@ functions
 
                     // Wall quantities from OpenFOAM fields
                     localWallQ.append(fx);
+                    localWallQ.append(arclengthOf(fx, fy)); // s [m] along upper surface from xi=0
                     localWallQ.append(pw[fi]);              // p/ρ [m²/s²]
                     localWallQ.append(mag(wssPatch[fi]));   // |τ_w|/ρ [m²/s²]
                     localWallQ.append(ypPatch[fi]);
@@ -583,26 +620,27 @@ functions
                         << " wall points to " << wos.name() << endl;
                 }
 
-                // ── Write wall quantities (Cp, Cf, y+) ──
+                // ── Write wall quantities (x, s, p, tau, y+) ──
                 label totalWallQ = 0;
                 forAll(allWallQ, proci)
                 {
-                    totalWallQ += allWallQ[proci].size() / 4;
+                    totalWallQ += allWallQ[proci].size() / 5;
                 }
 
                 if (totalWallQ > 0)
                 {
                     OFstream qos(outDir/"wallQuantities.csv");
                     qos.precision(10);
-                    qos << "x,p,tau,yPlus" << nl;
+                    qos << "x,s,p,tau,yPlus" << nl;
 
                     forAll(allWallQ, proci)
                     {
                         const List<scalar>& qd = allWallQ[proci];
-                        for (label i = 0; i < qd.size(); i += 4)
+                        for (label i = 0; i < qd.size(); i += 5)
                         {
-                            qos << qd[i] << "," << qd[i+1] << ","
-                                << qd[i+2] << "," << qd[i+3] << nl;
+                            qos << qd[i]   << "," << qd[i+1] << ","
+                                << qd[i+2] << "," << qd[i+3] << ","
+                                << qd[i+4] << nl;
                         }
                     }
 
