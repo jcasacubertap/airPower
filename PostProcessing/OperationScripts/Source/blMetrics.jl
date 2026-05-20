@@ -263,70 +263,90 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    bl_face_integrals(n_int, u_int, omz_int; method, max_n) → (δ99, δ*, θ, U_e)
+    METHODS
 
-Compute the boundary-layer integral metrics for one wall face, given the
-interior-cell column data sorted along the wall normal (n_int[k] > 0).
-
-  - `method = "vorticityIntegral"`: U_e = −∫_{n_int[1]}^{n_int[end]} ω_z dn,
-     skipping the wall-extrapolation row by user choice (its ω_z is the
-     extrapolated value and can be unphysical).
-  - `δ99`: first crossing of `u_tan / U_e = 0.99`, with `u_tan(0) = 0` anchored
-     at the wall (no slip).
-  - `δ*`, `θ`: trapezoidal from `n = 0` to `δ99` on the same anchored profile.
+Constants for the supported U_e (freestream-edge speed) methods.
 """
-function bl_face_integrals(n_int::Vector{Float64}, u_int::Vector{Float64},
-                           omz_int::Vector{Float64};
-                           method::AbstractString, max_n::Real)
+const METHODS = ("vorticityIntegral", "maxProfile", "fixedHeight")
+
+"""
+    compute_ue(n_int, u_int, omz_int, method) → U_e (Float64 or NaN)
+
+Three simple methods, all evaluated on the interior-cell column sorted
+ascending in `n_int`. The wall-extrapolation row (n ≈ 0) is dropped *before*
+this is called, so `n_int[1]` is the first interior cell above the wall.
+
+  - `"vorticityIntegral"` : U_e = −∫_{n_int[1]}^{n_int[end]} ω_z dn (trapezoid).
+  - `"maxProfile"`        : U_e = max(u_tan) along the column.
+  - `"fixedHeight"`       : U_e = u_tan at the topmost cell (≈ exportHeight).
+"""
+function compute_ue(n_int::Vector{Float64}, u_int::Vector{Float64},
+                    omz_int::Vector{Float64}, method::AbstractString)
     K = length(n_int)
-    K < 2 && return (NaN, NaN, NaN, NaN)
-
-    # Sort by n (interior cells)
-    perm = sortperm(n_int)
-    n_int   = n_int[perm]
-    u_int   = u_int[perm]
-    omz_int = omz_int[perm]
-
-    # Truncate at max_n (exportHeight) — should already match, but enforce
-    if isfinite(max_n)
-        cut = findlast(<=(max_n), n_int)
-        cut === nothing && return (NaN, NaN, NaN, NaN)
-        if cut < K
-            n_int = n_int[1:cut]; u_int = u_int[1:cut]; omz_int = omz_int[1:cut]
-        end
-    end
-    length(n_int) < 2 && return (NaN, NaN, NaN, NaN)
-
-    # ── U_e ─────────────────────────────────────────────────────────────
-    Ue = NaN
+    K < 2 && return NaN
     if method == "vorticityIntegral"
         Ue = 0.0
-        @inbounds for k in 1:length(n_int)-1
+        @inbounds for k in 1:K-1
             Ue += -0.5 * (omz_int[k] + omz_int[k+1]) * (n_int[k+1] - n_int[k])
         end
+        return Ue
+    elseif method == "maxProfile"
+        return maximum(u_int)
+    elseif method == "fixedHeight"
+        return u_int[end]            # topmost cell (column sorted ascending in n)
     else
-        error("Unknown freestream method: $(method)")
+        error("Unknown freestream method: $(method) — supported: $(METHODS)")
     end
-    (!(Ue > 0) || !isfinite(Ue)) && return (NaN, NaN, NaN, Ue)
+end
 
-    # Augment with wall point (n=0, u=0) for δ99 / δ* / θ
+"""
+    compute_bl_integrals(n_int, u_int, Ue; max_n) → (δ99, δ*, θ)
+
+For one wall face and a given freestream `Ue`, compute the BL thicknesses.
+Anchors u_tan(0) = 0 at the wall (no slip); integrates trapezoidally up to
+δ99 (first crossing of u_tan / U_e = 0.99, linearly interpolated). Returns
+NaNs if the column is too short, U_e is non-positive, or δ99 is not reached.
+
+Note: the integration is bounded by δ99 rather than extending to the top of
+the column. Extending into the freestream amplifies the (1 − u/Ue) error
+across a much wider tail than the BL itself when Ue is even slightly off
+(1–3 % Ue error becomes ≈ 100 % δ* error in 30·δ99-thick columns).
+"""
+function compute_bl_integrals(n_int::Vector{Float64}, u_int::Vector{Float64},
+                              Ue::Real; max_n::Real)
+    K = length(n_int)
+    K < 2 && return (NaN, NaN, NaN)
+    (!(Ue > 0) || !isfinite(Ue)) && return (NaN, NaN, NaN)
+
+    # Sort + truncate at max_n
+    perm = sortperm(n_int)
+    n_int = n_int[perm]; u_int = u_int[perm]
+    if isfinite(max_n)
+        cut = findlast(<=(max_n), n_int)
+        cut === nothing && return (NaN, NaN, NaN)
+        if cut < K
+            n_int = n_int[1:cut]; u_int = u_int[1:cut]
+        end
+    end
+    length(n_int) < 2 && return (NaN, NaN, NaN)
+
+    # Wall point (n=0, u=0)
     n_aug = pushfirst!(copy(n_int), 0.0)
     u_aug = pushfirst!(copy(u_int), 0.0)
 
-    # ── δ99 ─────────────────────────────────────────────────────────────
+    # δ99 — first u/Ue = 0.99 crossing
     δ99 = NaN
     @inbounds for k in 2:length(n_aug)
-        r1 = u_aug[k-1] / Ue
-        r2 = u_aug[k]   / Ue
+        r1 = u_aug[k-1] / Ue; r2 = u_aug[k] / Ue
         if r1 < 0.99 <= r2
             t = (0.99 - r1) / (r2 - r1)
             δ99 = n_aug[k-1] + t * (n_aug[k] - n_aug[k-1])
             break
         end
     end
-    isnan(δ99) && return (δ99, NaN, NaN, Ue)
+    isnan(δ99) && return (NaN, NaN, NaN)
 
-    # ── δ*, θ via trapezoid 0 → δ99 ─────────────────────────────────────
+    # δ*, θ trapezoid 0 → δ99
     δstar = 0.0; θmom = 0.0
     @inbounds for k in 2:length(n_aug)
         n1, n2 = n_aug[k-1], n_aug[k]
@@ -335,17 +355,17 @@ function bl_face_integrals(n_int::Vector{Float64}, u_int::Vector{Float64},
             t = (δ99 - n1) / (n2 - n1)
             r2 = r1 + t * (u_aug[k] / Ue - r1)
             dn = δ99 - n1
-            δstar += 0.5 * ((1 - r1) + (1 - r2))         * dn
-            θmom  += 0.5 * (r1*(1 - r1) + r2*(1 - r2))   * dn
+            δstar += 0.5 * ((1 - r1) + (1 - r2))       * dn
+            θmom  += 0.5 * (r1*(1 - r1) + r2*(1 - r2)) * dn
             break
         else
             r2 = u_aug[k] / Ue
             dn = n2 - n1
-            δstar += 0.5 * ((1 - r1) + (1 - r2))         * dn
-            θmom  += 0.5 * (r1*(1 - r1) + r2*(1 - r2))   * dn
+            δstar += 0.5 * ((1 - r1) + (1 - r2))       * dn
+            θmom  += 0.5 * (r1*(1 - r1) + r2*(1 - r2)) * dn
         end
     end
-    return (δ99, δstar, θmom, Ue)
+    return (δ99, δstar, θmom)
 end
 
 # ---------------------------------------------------------------------------
@@ -385,12 +405,17 @@ function main(case_dir::AbstractString)
     buckets = [Int[] for _ in 1:nW]
     @inbounds for i in eachindex(near); push!(buckets[near[i]], i); end
 
-    # Per-face BL integrals
+    # Per-face BL integrals — compute ALL three methods every run
+    method in METHODS ||
+        error("blMetrics.method = $(method) — supported: $(METHODS)")
     xs = @view data[:,1]; ys = @view data[:,2]
     us = @view data[:,4]; vs = @view data[:,5]
     ωs = @view data[:, col_omz]
-    out   = Matrix{Float64}(undef, nW, 6)               # x, s, Ue, d99, dstar, Theta
-    valid = falses(nW)
+
+    # Per-method arrays
+    Ue_v   = fill(NaN, nW); d99_v  = fill(NaN, nW); dst_v  = fill(NaN, nW); th_v   = fill(NaN, nW)
+    Ue_m   = fill(NaN, nW); d99_m  = fill(NaN, nW); dst_m  = fill(NaN, nW); th_m   = fill(NaN, nW)
+    Ue_f   = fill(NaN, nW); d99_f  = fill(NaN, nW); dst_f  = fill(NaN, nW); th_f   = fill(NaN, nW)
 
     for j in 1:nW
         nxj, nyj, txj, tyj = frames[j]
@@ -405,45 +430,77 @@ function main(case_dir::AbstractString)
             u_col[k] = us[i]*txj + vs[i]*tyj
             ω_col[k] = ωs[i]
         end
-        # Skip the wall-extrap row (n ≈ 0): the extrapolated ω_z can be unphysical
-        keep = findall(>(1e-9), n_col)
-        δ99, δstar, θmom, Ue = bl_face_integrals(
-            n_col[keep], u_col[keep], ω_col[keep];
-            method=method, max_n=expHeightM)
+        # Drop the wall-extrap row (n ≈ 0): its ω_z is the extrapolated value
+        # and can be unphysical. Then sort ascending in n once (compute_ue and
+        # compute_bl_integrals require this for the fixedHeight variant).
+        keep   = findall(>(1e-9), n_col)
+        nperm  = sortperm(view(n_col, keep))
+        n_int  = n_col[keep][nperm]
+        u_int  = u_col[keep][nperm]
+        omz_int = ω_col[keep][nperm]
 
-        out[j,1] = xw[j]    # global x (post-AoA rotation), same convention as wallQuantities.csv
-        out[j,2] = ss[j]    # arclength along upper surface from xi=0
-        out[j,3] = Ue
-        out[j,4] = δ99
-        out[j,5] = δstar
-        out[j,6] = θmom
-        valid[j] = isfinite(δ99) && isfinite(δstar) && isfinite(θmom) &&
-                   isfinite(Ue) && Ue > 0
+        Ue_v[j] = compute_ue(n_int, u_int, omz_int, "vorticityIntegral")
+        Ue_m[j] = compute_ue(n_int, u_int, omz_int, "maxProfile")
+        Ue_f[j] = compute_ue(n_int, u_int, omz_int, "fixedHeight")
+        d99_v[j], dst_v[j], th_v[j] = compute_bl_integrals(n_int, u_int, Ue_v[j]; max_n=expHeightM)
+        d99_m[j], dst_m[j], th_m[j] = compute_bl_integrals(n_int, u_int, Ue_m[j]; max_n=expHeightM)
+        d99_f[j], dst_f[j], th_f[j] = compute_bl_integrals(n_int, u_int, Ue_f[j]; max_n=expHeightM)
     end
 
-    # Write BLQuantities.csv (sorted by xi for monotone surface order)
+    # Production output (configured method) — sorted by xi
+    sel = method == "vorticityIntegral" ? (Ue_v, d99_v, dst_v, th_v) :
+          method == "maxProfile"        ? (Ue_m, d99_m, dst_m, th_m) :
+                                          (Ue_f, d99_f, dst_f, th_f)
+    Ue_sel, d99_sel, dst_sel, th_sel = sel
+
     outFile = joinpath(case_dir, "postProcessing", "BLQuantities.csv")
     open(outFile, "w") do io
         println(io, "x,s,Ue,d99,dstar,Theta")
         for k in 1:nW
             j = perm[k]
             @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
-                    out[j,1], out[j,2], out[j,3], out[j,4], out[j,5], out[j,6])
+                    xw[j], ss[j], Ue_sel[j], d99_sel[j], dst_sel[j], th_sel[j])
         end
     end
 
-    # Summary
-    nValid = count(valid)
-    @printf "  method=%s  wall faces=%d (%d valid)  xi∈[%.4f, %.4f]\n" method nW nValid minimum(xis) maximum(xis)
-    if nValid > 0
-        vUe = out[valid,3]; vd99 = out[valid,4]; vds = out[valid,5]; vth = out[valid,6]
-        @printf "    Ue   [m/s] : median=%.3f  range=[%.3f, %.3f]\n"    median(vUe) minimum(vUe) maximum(vUe)
-        @printf "    d99  [mm]  : median=%.4f  range=[%.4f, %.4f]\n"    1e3*median(vd99) 1e3*minimum(vd99) 1e3*maximum(vd99)
-        @printf "    dstar[mm]  : median=%.4f  range=[%.4f, %.4f]\n"    1e3*median(vds)  1e3*minimum(vds)  1e3*maximum(vds)
-        @printf "    Theta[mm]  : median=%.4f  range=[%.4f, %.4f]\n"    1e3*median(vth)  1e3*minimum(vth)  1e3*maximum(vth)
-        @printf "    H = dstar/Theta : median=%.3f\n"                   median(vds ./ vth)
+    # Comparison output (all three methods) — same row order
+    cmpFile = joinpath(case_dir, "postProcessing", "BLQuantities_compare.csv")
+    open(cmpFile, "w") do io
+        println(io, "x,s," *
+            "Ue_vorticity,Ue_max,Ue_fix," *
+            "d99_vorticity,d99_max,d99_fix," *
+            "dstar_vorticity,dstar_max,dstar_fix," *
+            "Theta_vorticity,Theta_max,Theta_fix")
+        for k in 1:nW
+            j = perm[k]
+            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
+                xw[j], ss[j],
+                Ue_v[j],  Ue_m[j],  Ue_f[j],
+                d99_v[j], d99_m[j], d99_f[j],
+                dst_v[j], dst_m[j], dst_f[j],
+                th_v[j],  th_m[j],  th_f[j])
+        end
+    end
+
+    # Summary — table across all three methods, the configured one is starred
+    nW_valid(v) = count(isfinite, v)
+    star(m) = (m == method ? " *" : "")
+    @printf "  wall faces=%d  xi∈[%.4f, %.4f]   configured method = %s\n" nW minimum(xis) maximum(xis) method
+    @printf "  %-18s   %-7s   %-8s   %-8s   %-8s   %-7s\n" "method" "valid" "median Ue" "med d99" "med d*" "med H"
+    for (lbl, Ue_, d99_, ds_, th_) in (
+            ("vorticityIntegral", Ue_v, d99_v, dst_v, th_v),
+            ("maxProfile",        Ue_m, d99_m, dst_m, th_m),
+            ("fixedHeight",       Ue_f, d99_f, dst_f, th_f))
+        ok = isfinite.(Ue_) .& isfinite.(d99_) .& isfinite.(ds_) .& isfinite.(th_) .& (Ue_ .> 0)
+        nok = count(ok)
+        if nok > 0
+            @printf "  %-18s%s  %4d/%d  %8.3f   %7.4f   %7.4f   %5.3f\n" lbl star(lbl) nok nW median(Ue_[ok]) 1e3*median(d99_[ok]) 1e3*median(ds_[ok]) median(ds_[ok] ./ th_[ok])
+        else
+            @printf "  %-18s%s  %4d/%d  (no valid stations)\n" lbl star(lbl) 0 nW
+        end
     end
     @printf "  → %s\n" outFile
+    @printf "  → %s\n" cmpFile
 
     return nothing
 end

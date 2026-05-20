@@ -4,8 +4,11 @@ using DelimitedFiles, LaTeXStrings
     plot_wall_quantities(case_path; savedir, chord_mm, alpha_deg,
                          x_center_mm, y_center_mm)
 
-Plot Cp, Cf, and y+ along arc-length S from
-`postProcessing/wallQuantities.csv` and `wallCoordinates.csv`.
+Plot Cp, Cf, and y+ along arc-length S from `postProcessing/wallQuantities.csv`.
+The arclength `s` is now a column of that file (written by writeMidPlane), so
+this function no longer needs `wallCoordinates.csv`.
+
+The chord_mm/alpha/center args are kept for backward compatibility but unused.
 """
 function plot_wall_quantities(case_path::AbstractString;
                               savedir::AbstractString=case_path,
@@ -19,39 +22,16 @@ function plot_wall_quantities(case_path::AbstractString;
         return nothing
     end
 
-    chord_m = chord_mm * 1e-3
-    alpha   = alpha_deg * π / 180.0
-    ca, sa  = cos(alpha), sin(alpha)
-    x_ctr   = x_center_mm * 1e-3
-    y_ctr   = y_center_mm * 1e-3
-
     raw = readdlm(csv_path, ','; skipstart=1)
-    x_w  = Float64.(raw[:, 1])
-    pw   = Float64.(raw[:, 2])   # p/ρ [m²/s²]
-    tw   = Float64.(raw[:, 3])   # |τ_w|/ρ [m²/s²]
-    yp   = Float64.(raw[:, 4])
+    x_w = Float64.(raw[:, 1])
+    S   = Float64.(raw[:, 2])   # arclength along upper surface from xi=0 [m]
+    pw  = Float64.(raw[:, 3])   # p/ρ [m²/s²]
+    tw  = Float64.(raw[:, 4])   # |τ_w|/ρ [m²/s²]
+    yp  = Float64.(raw[:, 5])
 
-    # Read wall coordinates for arc-length
-    wc_path = joinpath(case_path, "postProcessing", "wallCoordinates.csv")
-    if !isfile(wc_path)
-        @warn "wallCoordinates.csv not found — using x instead of arc-length"
-        perm = sortperm(x_w)
-        S = x_w[perm]; pw = pw[perm]; tw = tw[perm]; yp = yp[perm]
-    else
-        wc = readdlm(wc_path, ','; skipstart=1)
-        y_w = Float64.(wc[:, 2])
-
-        # Sort by x/c (inverse rotation)
-        xi_c = ((x_w .- x_ctr) .* ca .- (y_w .- y_ctr) .* sa) ./ chord_m .+ 0.5
-        perm = sortperm(xi_c)
-        x_w = x_w[perm]; y_w = y_w[perm]; pw = pw[perm]; tw = tw[perm]; yp = yp[perm]
-
-        # Compute arc-length
-        S = zeros(length(x_w))
-        for i in 2:length(x_w)
-            S[i] = S[i-1] + sqrt((x_w[i] - x_w[i-1])^2 + (y_w[i] - y_w[i-1])^2)
-        end
-    end
+    # Order by arclength for monotone plots
+    perm = sortperm(S)
+    S = S[perm]; pw = pw[perm]; tw = tw[perm]; yp = yp[perm]
 
     @info "Wall quantities: $(length(S)) points"
 

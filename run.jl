@@ -33,6 +33,7 @@ include(joinpath(PV_DIR, "fields.jl"))
 include(joinpath(PV_DIR, "profiles.jl"))
 include(joinpath(PV_DIR, "wallgeometry.jl"))
 include(joinpath(PV_DIR, "wallquantities.jl"))
+include(joinpath(PV_DIR, "blmetrics.jl"))
 include(joinpath(PV_DIR, "experimentalvalidation.jl"))
 include(joinpath(PV_DIR, "dfpvalidation.jl"))
 
