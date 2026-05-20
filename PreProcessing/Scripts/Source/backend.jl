@@ -540,6 +540,12 @@ Upinlet
  airfoilEta            $(length(eta_up))($(join(string.(eta_up), " ")));
 }
 
+//Boundary-layer integral metrics (consumed by blMetrics.jl post-processor)
+blMetrics
+{
+ method                $(a.blMetrics.method);   // vorticityIntegral | (future: fscStreamline)
+}
+
 // ************************************************************************* //""")
     end
     write_decompose_par_dict(case_dir, inp.TTCP.nProcs)

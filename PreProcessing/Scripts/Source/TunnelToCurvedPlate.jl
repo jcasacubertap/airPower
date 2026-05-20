@@ -214,6 +214,14 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             @info "Post-processing complete"
         end,
 
+        :blMetricsAirfoil => () -> begin
+            @info "Computing boundary-layer integral metrics..."
+            bl_script = joinpath(root, "PostProcessing", "OperationScripts",
+                                       "Source", "blMetrics.jl")
+            run(`julia $bl_script $airfoil_case`)
+            @info "blMetrics complete"
+        end,
+
         :vizTunnel => () -> begin
             plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
                                        "TunnelToCurvedPlate")
@@ -290,6 +298,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
         :_order => () -> [:clean, :prep, :meshTunnel, :runTunnel,
                           :meshAirfoil, :map, :runAirfoil, :postAirfoil,
+                          :blMetricsAirfoil,
                           :vizTunnel, :vizAirfoil],
     )
 end

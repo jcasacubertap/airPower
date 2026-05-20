@@ -13,9 +13,10 @@ fi
 
 echo "Post-processing time = $latestTime"
 
-# Step 1: Compute wallShearStress and yPlus fields (writes to time directory)
+# Step 1: Compute wallShearStress, yPlus, and vorticity fields (writes to time directory)
 simpleFoam -postProcess -func wallShearStress -time "$latestTime"
 simpleFoam -postProcess -func yPlus -time "$latestTime"
+simpleFoam -postProcess -func vorticity -time "$latestTime"
 
 # Step 2: Run all controlDict function objects (writeMidPlane + solverInfo)
 simpleFoam -postProcess -time "$latestTime"

@@ -146,6 +146,12 @@ const inp = (
             exportHeight = 0.020,       # wall-normal from surface [m]
             wallExtrapolation = true,   # add wall point (u=v=w=0, p extrapolated) to output
 
+            # Boundary-layer integral metrics (consumed by
+            # PostProcessing/OperationScripts/Source/blMetrics.jl)
+            blMetrics = (
+                method = "vorticityIntegral",  # vorticityIntegral | (future: fscStreamline)
+            ),
+
             # Suppress mapped-pressure noise in the BL on suction/pressure outlets:
             # within `factor` × Blasius δ from the wall, the prescribed p is set
             # constant equal to the value at the first face beyond that band.
