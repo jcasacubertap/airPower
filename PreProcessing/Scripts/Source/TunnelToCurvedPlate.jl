@@ -241,6 +241,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             wall = plot_wall_geometry(airfoil_case; savedir=plotting_dir, geom_args...)
             wallq = plot_wall_quantities(airfoil_case; savedir=plotting_dir, geom_args...)
             blq   = plot_bl_metrics(airfoil_case; savedir=plotting_dir)
+            blqc  = plot_bl_metrics_comparison(airfoil_case; savedir=plotting_dir)
             expval = nothing
             if inp.VAL.valPlot
                 expval = plot_experimental_validation(airfoil_case;
@@ -248,7 +249,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             end
 
             return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq,
-                    blq=blq, expval=expval)
+                    blq=blq, blqc=blqc, expval=expval)
         end,
 
         :monitorTunnel => () -> begin

@@ -149,7 +149,13 @@ const inp = (
             # Boundary-layer integral metrics (consumed by
             # PostProcessing/OperationScripts/Source/blMetrics.jl)
             blMetrics = (
-                method = "vorticityIntegral",  # vorticityIntegral | (future: fscStreamline)
+                # method — one of:
+                #   "vorticityIntegralTrapezoidal"  trapezoidal sum between cell centres
+                #   "vorticityIntegralMidpoint"     FV midpoint rule (cell extents, wall slice included)
+                #   "maxProfile"                    max(u_tan) in the column
+                #   "fixedHeight"                   u_tan at the topmost cell (≈ exportHeight)
+                #   "pressureBernoulli"             Bernoulli with p_e = p_wall (Prandtl)
+                method = "vorticityIntegralTrapezoidal",
             ),
 
             # Suppress mapped-pressure noise in the BL on suction/pressure outlets:

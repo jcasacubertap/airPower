@@ -4,18 +4,32 @@
 #
 # For each suction-side wall face exported by the writeMidPlane function
 # object, compute (d99, dstar, Theta) and the freestream speed U_e at that
-# station, and write postProcessing/BLQuantities.csv (columns x, s, Ue, d99,
-# dstar, Theta — x is the global, post-AoA-rotation wall-face x in metres
-# (same convention as postProcessing/wallQuantities.csv) and s is the
-# arclength along the upper surface measured from xi=0).
+# station, and write postProcessing/BLQuantities.csv (columns x, s, xi, Ue,
+# d99, dstar, Theta — x is the global, post-AoA-rotation wall-face x in
+# metres (same convention as postProcessing/wallQuantities.csv), s is the
+# arclength along the upper surface measured from xi=0, and xi is the chord
+# fraction (x/c) used to plot vs the airfoil-chord coordinate).
 # Each mid-plane cell is Voronoi-assigned to its nearest wall face to build
 # the wall-normal column.
 #
 # The freestream method is selected by `blMetrics.method` in
 # constant/inputParam. Currently supported:
-#   vorticityIntegral — U_e = −∫ ω_z dn along the wall normal (the wall-
-#                       extrapolation row is skipped; integration is
-#                       interior-cell-only).
+#   vorticityIntegralTrapezoidal — U_e = −∫ ω_z dn along the wall normal,
+#                       evaluated as a trapezoidal sum over interior mid-plane
+#                       cells (sorted ascending in wall-normal distance n).
+#                       Near-wall handling: the wall-extrapolation row written
+#                       by writeMidPlane (a single (x_w, y_w, z, 0, 0, 0, p,
+#                       omz) tuple at n ≈ 0, with ω_z linearly extrapolated
+#                       from the two innermost interior cells) is *excluded*
+#                       from the integral, because its extrapolated ω_z can be
+#                       unphysical near the leading edge. As a consequence the
+#                       integral starts at n_int[1] (the first interior cell,
+#                       typically ~10–100 μm above the wall) and the
+#                       contribution from n=0 to n_int[1] — where |ω_z| peaks
+#                       — is missed. This biases U_e slightly low, especially
+#                       in regions of strong wall-normal vorticity (e.g., near
+#                       the LE). The other methods (maxProfile, fixedHeight)
+#                       are immune to this near-wall slice.
 #
 # Invocation:
 #   julia blMetrics.jl <caseDir>          # caseDir defaults to "."
@@ -267,28 +281,64 @@ end
 
 Constants for the supported U_e (freestream-edge speed) methods.
 """
-const METHODS = ("vorticityIntegral", "maxProfile", "fixedHeight")
+const METHODS = ("vorticityIntegralTrapezoidal", "vorticityIntegralMidpoint",
+                 "maxProfile", "fixedHeight", "pressureBernoulli")
 
 """
     compute_ue(n_int, u_int, omz_int, method) → U_e (Float64 or NaN)
 
-Three simple methods, all evaluated on the interior-cell column sorted
-ascending in `n_int`. The wall-extrapolation row (n ≈ 0) is dropped *before*
-this is called, so `n_int[1]` is the first interior cell above the wall.
+Four simple methods, all evaluated on the interior-cell column sorted
+ascending in `n_int`. The wall-extrapolation row (n ≈ 0, written by the
+writeMidPlane FO with u=v=w=0 and an extrapolated ω_z) has already been
+filtered out by the caller, so `n_int[1]` is the first interior mid-plane
+cell above the wall (≈ 10–100 μm).
 
-  - `"vorticityIntegral"` : U_e = −∫_{n_int[1]}^{n_int[end]} ω_z dn (trapezoid).
+  - `"vorticityIntegralTrapezoidal"` :
+        U_e = − ∫_{n_int[1]}^{n_int[end]} ω_z(n) dn
+        Trapezoidal sum *between cell centres*. Cell 1's weight is only
+        ½·(n_int[2] − n_int[1]); the strip [0, n_int[1]] where |ω_z| peaks
+        sits outside the integration interval.
+  - `"vorticityIntegralMidpoint"` :
+        FV-consistent midpoint rule. Each cell's centre value is multiplied
+        by the cell's true wall-normal extent (face-to-face). Cell 1's
+        extent extends down to the wall — it is ½·(n_int[1] + n_int[2]),
+        so the wall slice is naturally included with no extrapolation.
+        Interior cell weights are identical to the trapezoidal rule; the
+        difference vs `vorticityIntegralTrapezoidal` is exactly the wall
+        slice ω_z[1]·n_int[1] (plus a negligible top-cell adjustment).
   - `"maxProfile"`        : U_e = max(u_tan) along the column.
   - `"fixedHeight"`       : U_e = u_tan at the topmost cell (≈ exportHeight).
+  - `"pressureBernoulli"` : classical Prandtl/Bernoulli.
+        Assume p is constant across the BL (so the edge pressure equals the
+        wall pressure: p_e = p_wall), then apply Bernoulli on a streamline
+        reaching freestream conditions (U_inf, p_∞):
+          U_e = sqrt( U_inf² + 2·(p_∞ − p_wall) )      (kinematic p)
+        Implemented in `main()` (needs p_wall from wallQuantities.csv),
+        not in `compute_ue`. Assumes p_∞ = 0 and U_inf is the chordwise
+        free-stream speed read from `Upinlet.freeStreamVelocityStreamwise`.
 """
 function compute_ue(n_int::Vector{Float64}, u_int::Vector{Float64},
                     omz_int::Vector{Float64}, method::AbstractString)
     K = length(n_int)
     K < 2 && return NaN
-    if method == "vorticityIntegral"
+    if method == "vorticityIntegralTrapezoidal"
+        # Trapezoidal integral of −ω_z from the first interior cell upwards.
+        # The wall slice [0, n_int[1]] is omitted (see docstring).
         Ue = 0.0
         @inbounds for k in 1:K-1
             Ue += -0.5 * (omz_int[k] + omz_int[k+1]) * (n_int[k+1] - n_int[k])
         end
+        return Ue
+    elseif method == "vorticityIntegralMidpoint"
+        # Per-cell midpoint rule: U_e = − Σ ω_z[k] · Δn_k where Δn_k is the
+        # face-to-face extent of cell k. Face positions inferred as midpoints
+        # between adjacent centres; cell 1 anchored at the wall (n=0).
+        Ue = 0.0
+        Ue += -omz_int[1] * 0.5 * (n_int[1] + n_int[2])             # wall → face_{1,2}
+        @inbounds for k in 2:K-1
+            Ue += -omz_int[k] * 0.5 * (n_int[k+1] - n_int[k-1])     # face_{k-1,k} → face_{k,k+1}
+        end
+        Ue += -omz_int[K] * 0.5 * (n_int[K] - n_int[K-1])           # same as trap at top (ω_z[K] ≈ 0)
         return Ue
     elseif method == "maxProfile"
         return maximum(u_int)
@@ -394,6 +444,15 @@ function main(case_dir::AbstractString)
     xw, yw    = read_wall_coords(wallCoords)
     nW        = length(xw)
 
+    # Wall pressure (kinematic) — same row order as wallCoordinates.csv since
+    # both are populated by the same filtered loop in writeMidPlane.
+    wallQ    = joinpath(case_dir, "postProcessing", "wallQuantities.csv")
+    isfile(wallQ) || error("missing $(wallQ) — needed for pressureBernoulli")
+    wq_data, _ = readdlm(wallQ, ',', Float64, '\n'; header=true)
+    p_wall = wq_data[:, 3]                    # col 3 = p in (x,s,p,tau,yPlus)
+    Uinf   = up["freeStreamVelocityStreamwise"]
+    Uinf2  = Uinf * Uinf
+
     # Geometry + wall-face parameterisation
     geom    = build_geom(up)
     xis, ss = project_wall_to_xi(geom, xw, yw)
@@ -413,9 +472,11 @@ function main(case_dir::AbstractString)
     ωs = @view data[:, col_omz]
 
     # Per-method arrays
-    Ue_v   = fill(NaN, nW); d99_v  = fill(NaN, nW); dst_v  = fill(NaN, nW); th_v   = fill(NaN, nW)
+    Ue_vT  = fill(NaN, nW); d99_vT = fill(NaN, nW); dst_vT = fill(NaN, nW); th_vT  = fill(NaN, nW)
+    Ue_vM  = fill(NaN, nW); d99_vM = fill(NaN, nW); dst_vM = fill(NaN, nW); th_vM  = fill(NaN, nW)
     Ue_m   = fill(NaN, nW); d99_m  = fill(NaN, nW); dst_m  = fill(NaN, nW); th_m   = fill(NaN, nW)
     Ue_f   = fill(NaN, nW); d99_f  = fill(NaN, nW); dst_f  = fill(NaN, nW); th_f   = fill(NaN, nW)
+    Ue_b   = fill(NaN, nW); d99_b  = fill(NaN, nW); dst_b  = fill(NaN, nW); th_b   = fill(NaN, nW)
 
     for j in 1:nW
         nxj, nyj, txj, tyj = frames[j]
@@ -439,64 +500,73 @@ function main(case_dir::AbstractString)
         u_int  = u_col[keep][nperm]
         omz_int = ω_col[keep][nperm]
 
-        Ue_v[j] = compute_ue(n_int, u_int, omz_int, "vorticityIntegral")
-        Ue_m[j] = compute_ue(n_int, u_int, omz_int, "maxProfile")
-        Ue_f[j] = compute_ue(n_int, u_int, omz_int, "fixedHeight")
-        d99_v[j], dst_v[j], th_v[j] = compute_bl_integrals(n_int, u_int, Ue_v[j]; max_n=expHeightM)
-        d99_m[j], dst_m[j], th_m[j] = compute_bl_integrals(n_int, u_int, Ue_m[j]; max_n=expHeightM)
-        d99_f[j], dst_f[j], th_f[j] = compute_bl_integrals(n_int, u_int, Ue_f[j]; max_n=expHeightM)
+        Ue_vT[j]  = compute_ue(n_int, u_int, omz_int, "vorticityIntegralTrapezoidal")
+        Ue_vM[j] = compute_ue(n_int, u_int, omz_int, "vorticityIntegralMidpoint")
+        Ue_m[j]  = compute_ue(n_int, u_int, omz_int, "maxProfile")
+        Ue_f[j]  = compute_ue(n_int, u_int, omz_int, "fixedHeight")
+        # Bernoulli (Prandtl): p_e ≈ p_wall; recover U_e from total head.
+        Ue_b[j]  = sqrt(max(0.0, Uinf2 - 2.0 * p_wall[j]))
+        d99_vT[j],  dst_vT[j],  th_vT[j]  = compute_bl_integrals(n_int, u_int, Ue_vT[j];  max_n=expHeightM)
+        d99_vM[j], dst_vM[j], th_vM[j] = compute_bl_integrals(n_int, u_int, Ue_vM[j]; max_n=expHeightM)
+        d99_m[j],  dst_m[j],  th_m[j]  = compute_bl_integrals(n_int, u_int, Ue_m[j];  max_n=expHeightM)
+        d99_f[j],  dst_f[j],  th_f[j]  = compute_bl_integrals(n_int, u_int, Ue_f[j];  max_n=expHeightM)
+        d99_b[j],  dst_b[j],  th_b[j]  = compute_bl_integrals(n_int, u_int, Ue_b[j];  max_n=expHeightM)
     end
 
     # Production output (configured method) — sorted by xi
-    sel = method == "vorticityIntegral" ? (Ue_v, d99_v, dst_v, th_v) :
-          method == "maxProfile"        ? (Ue_m, d99_m, dst_m, th_m) :
-                                          (Ue_f, d99_f, dst_f, th_f)
+    sel = method == "vorticityIntegralTrapezoidal" ? (Ue_vT, d99_vT, dst_vT, th_vT) :
+          method == "vorticityIntegralMidpoint"    ? (Ue_vM, d99_vM, dst_vM, th_vM) :
+          method == "maxProfile"                   ? (Ue_m,  d99_m,  dst_m,  th_m) :
+          method == "fixedHeight"                  ? (Ue_f,  d99_f,  dst_f,  th_f) :
+                                                     (Ue_b,  d99_b,  dst_b,  th_b)
     Ue_sel, d99_sel, dst_sel, th_sel = sel
 
     outFile = joinpath(case_dir, "postProcessing", "BLQuantities.csv")
     open(outFile, "w") do io
-        println(io, "x,s,Ue,d99,dstar,Theta")
+        println(io, "x,s,xi,Ue,d99,dstar,Theta")
         for k in 1:nW
             j = perm[k]
-            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
-                    xw[j], ss[j], Ue_sel[j], d99_sel[j], dst_sel[j], th_sel[j])
+            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
+                    xw[j], ss[j], xis[j], Ue_sel[j], d99_sel[j], dst_sel[j], th_sel[j])
         end
     end
 
-    # Comparison output (all three methods) — same row order
+    # Comparison output (all five methods) — same row order
     cmpFile = joinpath(case_dir, "postProcessing", "BLQuantities_compare.csv")
     open(cmpFile, "w") do io
         println(io, "x,s," *
-            "Ue_vorticity,Ue_max,Ue_fix," *
-            "d99_vorticity,d99_max,d99_fix," *
-            "dstar_vorticity,dstar_max,dstar_fix," *
-            "Theta_vorticity,Theta_max,Theta_fix")
+            "Ue_vorticityTrap,Ue_vorticityMid,Ue_max,Ue_fix,Ue_bern," *
+            "d99_vorticityTrap,d99_vorticityMid,d99_max,d99_fix,d99_bern," *
+            "dstar_vorticityTrap,dstar_vorticityMid,dstar_max,dstar_fix,dstar_bern," *
+            "Theta_vorticityTrap,Theta_vorticityMid,Theta_max,Theta_fix,Theta_bern")
         for k in 1:nW
             j = perm[k]
-            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
+            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
                 xw[j], ss[j],
-                Ue_v[j],  Ue_m[j],  Ue_f[j],
-                d99_v[j], d99_m[j], d99_f[j],
-                dst_v[j], dst_m[j], dst_f[j],
-                th_v[j],  th_m[j],  th_f[j])
+                Ue_vT[j],   Ue_vM[j],   Ue_m[j],   Ue_f[j],   Ue_b[j],
+                d99_vT[j],  d99_vM[j],  d99_m[j],  d99_f[j],  d99_b[j],
+                dst_vT[j],  dst_vM[j],  dst_m[j],  dst_f[j],  dst_b[j],
+                th_vT[j],   th_vM[j],   th_m[j],   th_f[j],   th_b[j])
         end
     end
 
-    # Summary — table across all three methods, the configured one is starred
+    # Summary — table across all five methods, the configured one is starred
     nW_valid(v) = count(isfinite, v)
     star(m) = (m == method ? " *" : "")
     @printf "  wall faces=%d  xi∈[%.4f, %.4f]   configured method = %s\n" nW minimum(xis) maximum(xis) method
-    @printf "  %-18s   %-7s   %-8s   %-8s   %-8s   %-7s\n" "method" "valid" "median Ue" "med d99" "med d*" "med H"
+    @printf "  %-26s   %-7s   %-8s   %-8s   %-8s   %-7s\n" "method" "valid" "median Ue" "med d99" "med d*" "med H"
     for (lbl, Ue_, d99_, ds_, th_) in (
-            ("vorticityIntegral", Ue_v, d99_v, dst_v, th_v),
-            ("maxProfile",        Ue_m, d99_m, dst_m, th_m),
-            ("fixedHeight",       Ue_f, d99_f, dst_f, th_f))
+            ("vorticityIntegralTrapezoidal", Ue_vT, d99_vT, dst_vT, th_vT),
+            ("vorticityIntegralMidpoint",    Ue_vM, d99_vM, dst_vM, th_vM),
+            ("maxProfile",                   Ue_m,  d99_m,  dst_m,  th_m),
+            ("fixedHeight",                  Ue_f,  d99_f,  dst_f,  th_f),
+            ("pressureBernoulli",            Ue_b,  d99_b,  dst_b,  th_b))
         ok = isfinite.(Ue_) .& isfinite.(d99_) .& isfinite.(ds_) .& isfinite.(th_) .& (Ue_ .> 0)
         nok = count(ok)
         if nok > 0
-            @printf "  %-18s%s  %4d/%d  %8.3f   %7.4f   %7.4f   %5.3f\n" lbl star(lbl) nok nW median(Ue_[ok]) 1e3*median(d99_[ok]) 1e3*median(ds_[ok]) median(ds_[ok] ./ th_[ok])
+            @printf "  %-26s%s  %4d/%d  %8.3f   %7.4f   %7.4f   %5.3f\n" lbl star(lbl) nok nW median(Ue_[ok]) 1e3*median(d99_[ok]) 1e3*median(ds_[ok]) median(ds_[ok] ./ th_[ok])
         else
-            @printf "  %-18s%s  %4d/%d  (no valid stations)\n" lbl star(lbl) 0 nW
+            @printf "  %-26s%s  %4d/%d  (no valid stations)\n" lbl star(lbl) 0 nW
         end
     end
     @printf "  → %s\n" outFile
