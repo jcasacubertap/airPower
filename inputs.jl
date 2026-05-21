@@ -12,7 +12,7 @@ const inp = (
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = true,            # true to activate the bump
+        enabled = false,            # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
         A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
