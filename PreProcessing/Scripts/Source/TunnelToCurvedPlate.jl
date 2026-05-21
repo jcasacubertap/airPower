@@ -211,15 +211,13 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     "rm -rf dynamicCode postProcessing" *
                     " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
             end
+            # Julia-side derivatives of the OF output (BL metrics + aero forces)
+            ops_src = joinpath(root, "PostProcessing", "OperationScripts", "Source")
+            @info "  → BL integral metrics"
+            run(`julia $(joinpath(ops_src, "blMetrics.jl")) $airfoil_case`)
+            @info "  → aerodynamic forces"
+            run(`julia $(joinpath(ops_src, "aeroForces.jl")) $airfoil_case`)
             @info "Post-processing complete"
-        end,
-
-        :blMetricsAirfoil => () -> begin
-            @info "Computing boundary-layer integral metrics..."
-            bl_script = joinpath(root, "PostProcessing", "OperationScripts",
-                                       "Source", "blMetrics.jl")
-            run(`julia $bl_script $airfoil_case`)
-            @info "blMetrics complete"
         end,
 
         :vizTunnel => () -> begin
@@ -300,7 +298,6 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
         :_order => () -> [:clean, :prep, :meshTunnel, :runTunnel,
                           :meshAirfoil, :map, :runAirfoil, :postAirfoil,
-                          :blMetricsAirfoil,
                           :vizTunnel, :vizAirfoil],
     )
 end

@@ -540,6 +540,15 @@ Upinlet
  airfoilEta            $(length(eta_up))($(join(string.(eta_up), " ")));
 }
 
+//Aerodynamic forces (consumed by aeroForces.jl post-processor)
+//Integrates static pressure and wall shear stress over the wall arclength
+//range defined by the chord fractions xiStart, xiEnd.
+aeroForces
+{
+ xiStart               $(a.aeroForces.xiStart);
+ xiEnd                 $(a.aeroForces.xiEnd);
+}
+
 //Boundary-layer integral metrics (consumed by blMetrics.jl post-processor)
 blMetrics
 {

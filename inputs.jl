@@ -146,6 +146,15 @@ const inp = (
             exportHeight = 0.020,       # wall-normal from surface [m]
             wallExtrapolation = true,   # add wall point (u=v=w=0, p extrapolated) to output
 
+            # Aerodynamic forces — integrate static pressure and wall shear
+            # stress over a wall arclength range defined by chord fractions
+            # [xiStart, xiEnd]. Consumed by
+            # PostProcessing/OperationScripts/Source/aeroForces.jl.
+            aeroForces = (
+                xiStart = 0.05,
+                xiEnd   = 0.30,
+            ),
+
             # Boundary-layer integral metrics (consumed by
             # PostProcessing/OperationScripts/Source/blMetrics.jl)
             blMetrics = (
