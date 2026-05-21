@@ -86,9 +86,9 @@ boundaryField
 		const scalar pa0   = readScalar(d.lookup("pa0"));
 		
 		// Additional for top-BC polynomial definition
-		// xmax is already in physical coords (domain starts at xInlet)
+		const scalar shift  = x0;                           // constant of the polynomial free-stream log(x+c)
 		const scalar eps    = 1e-12;                        // keeps log argument > 0
-		const scalar arg    = max(eps, xmax);     
+		const scalar arg    = max(eps, xmax + shift);     
 		const scalar L      = Foam::log(arg);       
 		
 		// Define external velocity as a polynomial
@@ -144,15 +144,15 @@ boundaryField
 		const scalar pa0   = readScalar(d.lookup("pa0"));
 		
 		// Additional for top-BC polynomial definition
-		// x-coordinates are already in physical frame (domain starts at xInlet)
+		const scalar shift  = x0;                            // constant of the polynomial free-stream log(x+c)
 		const scalar eps    = 1e-12;                        // keeps log argument > 0
 
         	forAll(bf,i)
            	{
-           	    // x-coordinates (already physical: x = xInlet + x_local)
+           	    // x-coordinates
 		    const scalar x   = Cf[i].x();
 		    // operators
-		    const scalar arg = max(eps, x);     
+		    const scalar arg = max(eps, x + shift);     
 		    const scalar L   = Foam::log(arg);          
             	    
             	    // define external velocity as a polynomial
