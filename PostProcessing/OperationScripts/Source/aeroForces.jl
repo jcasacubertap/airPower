@@ -1,17 +1,16 @@
 #!/usr/bin/env julia
 #
-# aeroForces — integrate static pressure and wall shear stress along the
-# (suction-side) wall over a user-specified chord-fraction range, and project
-# the results onto the global x axis.
+# aeroForces — integrate static pressure along the (suction-side) wall over a
+# user-specified chord-fraction range, project onto the global x and y axes.
 #
 # Reads:
 #   <case>/constant/inputParam                 (Upinlet + aeroForces sub-dicts)
-#   <case>/postProcessing/wallQuantities.csv   (x, s, p, tau, yPlus)
+#   <case>/postProcessing/wallQuantities.csv   (x, s, p, dudy, yPlus)
 #   <case>/postProcessing/wallCoordinates.csv  (x, y, used to recover xi)
 #
 # Writes:
 #   <case>/postProcessing/aeroForces.csv
-#     xiStart,xiEnd,F_p_avg,F_p_x,F_p_y,F_tau_x
+#     xiStart,xiEnd,F_p_avg,F_p_x,F_p_y
 #     <…>
 #
 # Quantities — all are FORCES ON THE WALL FROM THE FLUID
@@ -26,11 +25,9 @@
 #
 #   F_p_x   = −∫ p·n_x dS                  pressure force on the wall, x-component
 #   F_p_y   = −∫ p·n_y dS                  pressure force on the wall, y-component
-#   F_tau_x = +∫ τ_w·t_x dS                friction force on the wall, x-component
 #
-# Sign convention for the projected force components:
+# Sign convention:
 #   • pressure force per area on the wall = −p·n̂   (n̂ outward; fluid pushes wall in)
-#   • friction force per area on the wall = +τ_w·t̂ (t̂ tangent toward +xi)
 #
 # All face geometry helpers (read_subdict, build_geom, surface_frame,
 # project_wall_to_xi) are reused from blMetrics.jl via include.
@@ -62,9 +59,9 @@ function main_aeroforces(case_dir::AbstractString)
     xiE = af["xiEnd"]
     xiS < xiE || error("aeroForces: xiStart ($xiS) must be less than xiEnd ($xiE)")
 
-    # Read wall quantities (x, s, p, tau, yPlus) and wall coords (x, y)
+    # Read wall quantities (x, s, p, dudy, yPlus) and wall coords (x, y)
     wq, _ = readdlm(wallQ, ',', Float64, '\n'; header=true)
-    x_w = wq[:, 1]; s_w = wq[:, 2]; p_w = wq[:, 3]; tau_w = wq[:, 4]
+    x_w = wq[:, 1]; s_w = wq[:, 2]; p_w = wq[:, 3]
     nW = length(x_w)
 
     wc, _ = readdlm(wallCoords, ',', Float64, '\n'; header=true)
@@ -99,14 +96,12 @@ function main_aeroforces(case_dir::AbstractString)
     I_p   = 0.0                                  # ∫ p dS
     I_p_x = 0.0                                  # ∫ p·n_x dS
     I_p_y = 0.0                                  # ∫ p·n_y dS
-    I_t_x = 0.0                                  # ∫ τ_w·t_x dS
     for k in 1:nSel
         j  = sel[k]
-        nx, ny, tx, _ = frames[j]
-        I_p   += p_w[j]           * dS[k]
-        I_p_x += p_w[j]   * nx    * dS[k]
-        I_p_y += p_w[j]   * ny    * dS[k]
-        I_t_x += tau_w[j] * tx    * dS[k]
+        nx, ny, _, _ = frames[j]
+        I_p   += p_w[j]        * dS[k]
+        I_p_x += p_w[j] * nx   * dS[k]
+        I_p_y += p_w[j] * ny   * dS[k]
     end
 
     # Final force-like quantities on the wall:
@@ -116,17 +111,15 @@ function main_aeroforces(case_dir::AbstractString)
     #   F_p_x   : x-component of the actual pressure force on the wall
     #             (per area, this is −p·n̂; we integrate and project on x).
     #   F_p_y   : y-component of the actual pressure force on the wall.
-    #   F_tau_x : x-component of the actual friction force on the wall.
     F_p_avg = I_p
     F_p_x   = -I_p_x
     F_p_y   = -I_p_y
-    F_tau_x = +I_t_x
 
     # Write the output file (with a short sign-convention preamble; readers
     # should be configured to skip lines beginning with '#').
     outFile = joinpath(case_dir, "postProcessing", "aeroForces.csv")
     open(outFile, "w") do io
-        println(io, "# aeroForces — forces on the wall from the fluid, integrated over")
+        println(io, "# aeroForces — pressure forces on the wall from the fluid, integrated over")
         println(io, "# xi ∈ [xiStart, xiEnd] along the upper-surface arclength.")
         println(io, "# Kinematic units (m^3/s^2); multiply by ρ for N/m per span.")
         println(io, "# Sign convention:")
@@ -137,22 +130,19 @@ function main_aeroforces(case_dir::AbstractString)
         println(io, "#   F_p_y   = −∫ p·n_y dS   pressure force on the wall, y-component")
         println(io, "#                            (n̂ is the outward wall normal; fluid")
         println(io, "#                             pushes the wall in the −n̂ direction)")
-        println(io, "#   F_tau_x = +∫ τ_w·t_x dS friction force on the wall, x-component")
-        println(io, "#                            (t̂ is the wall tangent toward +xi)")
-        println(io, "xiStart,xiEnd,F_p_avg,F_p_x,F_p_y,F_tau_x")
-        @printf(io, "%.6g,%.6g,%.10g,%.10g,%.10g,%.10g\n",
-                xiS, xiE, F_p_avg, F_p_x, F_p_y, F_tau_x)
+        println(io, "xiStart,xiEnd,F_p_avg,F_p_x,F_p_y")
+        @printf(io, "%.6g,%.6g,%.10g,%.10g,%.10g\n",
+                xiS, xiE, F_p_avg, F_p_x, F_p_y)
     end
 
     # Summary
     arc_total = sum(dS)
     @printf "  xi window = [%.4f, %.4f]   (%d wall faces)\n" xiS xiE nSel
     @printf "  s window  = [%.6f, %.6f] m   total arclength = %.6f m\n" s_sel[1] s_sel[end] arc_total
-    @printf "  Forces on the wall (kinematic, multiply by ρ for N/m per span):\n"
+    @printf "  Pressure forces on the wall (kinematic, multiply by ρ for N/m per span):\n"
     @printf "    F_p_avg = %+.6g  [m^3/s^2]   (= ⟨p⟩·arclength = %+.6g · %.6f)\n" F_p_avg (F_p_avg/arc_total) arc_total
     @printf "    F_p_x   = %+.6g              (pressure force, x-component)\n" F_p_x
     @printf "    F_p_y   = %+.6g              (pressure force, y-component)\n" F_p_y
-    @printf "    F_tau_x = %+.6g              (friction force, x-component)\n" F_tau_x
     @printf "  → %s\n" outFile
 
     return nothing

@@ -23,15 +23,15 @@ function plot_wall_quantities(case_path::AbstractString;
     end
 
     raw = readdlm(csv_path, ','; skipstart=1)
-    x_w = Float64.(raw[:, 1])
-    S   = Float64.(raw[:, 2])   # arclength along upper surface from xi=0 [m]
-    pw  = Float64.(raw[:, 3])   # p/ρ [m²/s²]
-    tw  = Float64.(raw[:, 4])   # |τ_w|/ρ [m²/s²]
-    yp  = Float64.(raw[:, 5])
+    x_w  = Float64.(raw[:, 1])
+    S    = Float64.(raw[:, 2])   # arclength along upper surface from xi=0 [m]
+    pw   = Float64.(raw[:, 3])   # p/ρ [m²/s²]
+    dudy = Float64.(raw[:, 4])   # ∂u/∂y at the wall [1/s] (signed; flips at separation)
+    yp   = Float64.(raw[:, 5])
 
     # Order by arclength for monotone plots
     perm = sortperm(S)
-    S = S[perm]; pw = pw[perm]; tw = tw[perm]; yp = yp[perm]
+    S = S[perm]; pw = pw[perm]; dudy = dudy[perm]; yp = yp[perm]
 
     @info "Wall quantities: $(length(S)) points"
 
@@ -60,12 +60,13 @@ function plot_wall_quantities(case_path::AbstractString;
         title  = "Wall pressure",
         common...)
 
-    p2 = plot(S, tw;
+    p2 = plot(S, dudy;
         xlabel = L"S \ \mathrm{[m]}",
-        ylabel = L"|\tau_w|/\rho \ \mathrm{[m^2/s^2]}",
+        ylabel = L"\partial u/\partial y \ \mathrm{[1/s]}",
         color  = :firebrick,
-        title  = "Wall shear stress",
+        title  = L"\partial u/\partial y \ \mathrm{at\ wall\ (sign\ flips\ at\ separation)}",
         common...)
+    Plots.hline!(p2, [0]; color=:black, linestyle=:dash, linewidth=1, label="")
 
     p3 = plot(S, yp;
         xlabel = L"S \ \mathrm{[m]}",
