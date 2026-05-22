@@ -118,8 +118,8 @@ function plot_fields(case_path::AbstractString;
     u_all = Float64[]; v_all = Float64[]; w_all = Float64[]; p_all = Float64[]
     for line in lines[2:end]
         fields = split(line, ',')
-        length(fields) == 7 || continue
-        vals = tryparse.(Float64, fields)
+        length(fields) >= 7 || continue
+        vals = tryparse.(Float64, fields[1:7])
         any(isnothing, vals) && continue
         push!(x_all, vals[1]); push!(y_all, vals[2]); push!(z_all, vals[3])
         push!(u_all, vals[4]); push!(v_all, vals[5]); push!(w_all, vals[6])
