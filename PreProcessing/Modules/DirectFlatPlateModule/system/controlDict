@@ -113,7 +113,14 @@ functions
             }
 
             // ── Wall extrapolation: add wall face centres with u=v=w=0 ──
-            // p is extrapolated from the two nearest interior cells (2nd order)
+            // Wall pressure is taken from the BC value (pw[fi]). For the
+            // standard zeroGradient pressure BC this equals the owner-cell
+            // pressure — the same value OpenFOAM integrates for forces and
+            // the same one already exported in wall-quantity outputs.
+            // The previous 2-point linear extrapolation assumed a vertical
+            // wall normal (dist = C[ci].y() - fy) and a tight x-column
+            // filter; both assumptions break on the bump's sloped region,
+            // producing the same kind of artifacts seen in AirfoilLECase.
             DynamicList<label> wallFaces;
             DynamicList<scalar> wallP;
             if (wallExtrap)
@@ -123,53 +130,13 @@ functions
                 {
                     const polyPatch& pp = mesh.boundaryMesh()[patchID];
                     const vectorField faceCentres(pp.faceCentres());  // copy to avoid dangling ref
+                    const fvPatchScalarField& pw = p.boundaryField()[patchID];
 
-                    // For 2nd-order extrapolation, find the two nearest
-                    // mid-plane cells to each wall face (sorted by distance)
                     forAll(faceCentres, fi)
                     {
                         if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
-
-                        // Find two closest mid-plane cells by wall-normal distance
-                        scalar d1 = GREAT, d2 = GREAT;
-                        label c1 = -1, c2 = -1;
-                        double fx = faceCentres[fi].x();
-                        double fy = faceCentres[fi].y();  // wall face y (=0 flat, >0 bump)
-
-                        forAll(cells, ci_idx)
-                        {
-                            label ci = cells[ci_idx];
-                            // Same x-column: within half a cell width
-                            if (mag(C[ci].x() - fx) > 5e-4) continue;
-                            scalar dist = C[ci].y() - fy;  // distance above wall face
-                            if (dist > 0 && dist < d1)
-                            {
-                                d2 = d1; c2 = c1;
-                                d1 = dist; c1 = ci;
-                            }
-                            else if (dist > 0 && dist < d2)
-                            {
-                                d2 = dist; c2 = ci;
-                            }
-                        }
-
                         wallFaces.append(fi);
-                        if (c1 >= 0 && c2 >= 0 && d2 > d1 + SMALL)
-                        {
-                            // 2nd-order: linear extrapolation to wall face y
-                            scalar y1 = C[c1].y(), y2 = C[c2].y();
-                            scalar p1 = p[c1],     p2 = p[c2];
-                            scalar pWall = p1 + (p2 - p1) * (fy - y1) / (y2 - y1);
-                            wallP.append(pWall);
-                        }
-                        else if (c1 >= 0)
-                        {
-                            wallP.append(p[c1]);  // 1st order fallback
-                        }
-                        else
-                        {
-                            wallP.append(0.0);
-                        }
+                        wallP.append(pw[fi]);
                     }
 
                     Info<< "writeMidPlane: wall extrapolation — "
