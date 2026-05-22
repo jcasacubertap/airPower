@@ -95,6 +95,7 @@ functions
             #include <fstream>
             #include <cmath>
             #include "Pstream.H"
+            #include "fvcGrad.H"
         #};
 
         codeExecute
@@ -341,13 +342,17 @@ functions
                 // ── Collect wall face data in the exported region ──
                 const fvPatchScalarField& pw = p.boundaryField()[patchID];
 
-                // Read OpenFOAM-computed wallShearStress and yPlus fields
-                const volVectorField& wss =
-                    mesh.lookupObject<volVectorField>("wallShearStress");
+                // OpenFOAM-computed y+ field and on-the-fly grad(U).
+                // The signed ∂u/∂y at the wall is exported as the "dudy"
+                // column; its sign change locates separation points (∂u/∂y > 0
+                // attached → ∂u/∂y < 0 reverse flow).
                 const volScalarField& yPlusField =
                     mesh.lookupObject<volScalarField>("yPlus");
-                const vectorField& wssPatch = wss.boundaryField()[patchID];
                 const scalarField& ypPatch  = yPlusField.boundaryField()[patchID];
+
+                const volTensorField gradU(fvc::grad(U));
+                const tensorField& gradU_patch =
+                    gradU.boundaryField()[patchID];
 
                 forAll(faceCentres, fi)
                 {
@@ -369,9 +374,9 @@ functions
 
                     // Wall quantities from OpenFOAM fields
                     localWallQ.append(fx);
-                    localWallQ.append(arclengthOf(fx, fy)); // s [m] along upper surface from xi=0
-                    localWallQ.append(pw[fi]);              // p/ρ [m²/s²]
-                    localWallQ.append(mag(wssPatch[fi]));   // |τ_w|/ρ [m²/s²]
+                    localWallQ.append(arclengthOf(fx, fy));  // s [m] along upper surface from xi=0
+                    localWallQ.append(pw[fi]);               // p/ρ [m²/s²]
+                    localWallQ.append(gradU_patch[fi].yx()); // ∂u/∂y [1/s] (signed; flips at separation)
                     localWallQ.append(ypPatch[fi]);
                 }
 
@@ -421,17 +426,25 @@ functions
                             }
                         }
 
-                        double pWall = 0.0;
+                        // Wall pressure: take the BC value directly. For the
+                        // standard zeroGradient pressure BC this equals the
+                        // owner-cell pressure (1st order, no tangential
+                        // ambiguity) — the same value OpenFOAM integrates for
+                        // force coefficients. Linear extrapolation from two
+                        // interior cells filtered by a 3 mm tangential window
+                        // produced large errors here (worst case > 2000 m²/s²
+                        // with sign flips), because cells passing the dt<3 mm
+                        // filter are not necessarily normal-stacked above the
+                        // face on a curved O-grid.
+                        double pWall   = pw[fi];
                         double omzWall = 0.0;
                         if (c1 >= 0 && c2 >= 0 && d2 > d1 + SMALL)
                         {
-                            // 2nd-order: linear extrapolation to dn=0
-                            pWall   = p[c1]         + (p[c2]         - p[c1]        ) * (0.0 - d1) / (d2 - d1);
+                            // 2nd-order linear extrapolation for omz (no BC shortcut)
                             omzWall = vort[c1].z() + (vort[c2].z() - vort[c1].z()) * (0.0 - d1) / (d2 - d1);
                         }
                         else if (c1 >= 0)
                         {
-                            pWall   = p[c1];
                             omzWall = vort[c1].z();
                         }
 
@@ -620,7 +633,9 @@ functions
                         << " wall points to " << wos.name() << endl;
                 }
 
-                // ── Write wall quantities (x, s, p, tau, y+) ──
+                // ── Write wall quantities (x, s, p, dudy, y+) ──
+                // dudy is the signed ∂u/∂y at the wall — zero crossing
+                // indicates separation.
                 label totalWallQ = 0;
                 forAll(allWallQ, proci)
                 {
@@ -631,7 +646,7 @@ functions
                 {
                     OFstream qos(outDir/"wallQuantities.csv");
                     qos.precision(10);
-                    qos << "x,s,p,tau,yPlus" << nl;
+                    qos << "x,s,p,dudy,yPlus" << nl;
 
                     forAll(allWallQ, proci)
                     {
