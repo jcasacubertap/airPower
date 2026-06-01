@@ -195,6 +195,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :postAirfoil => () -> begin
+            write_airfoil_le_input_param(airfoil_case)
             @info "Post-processing AirfoilLECase..."
             if backend == DOCKER
                 work = "/tmp/AirfoilLECase_post"

@@ -184,6 +184,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
         end,
 
         :post => () -> begin
+            write_flat_plate_input_param(case_dir)
             @info "Post-processing DirectFlatPlate..."
             if backend == DOCKER
                 work = "/tmp/DFP_post"
