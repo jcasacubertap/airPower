@@ -126,14 +126,35 @@ functions
             const bool wallExtrap = d.lookupOrDefault<bool>("wallExtrapolation", false);
 
             // ── Mid-plane cell selection ──
-            // nz=2, zWidth=2mm → cell center at z=0.0005 m
-            const scalar zTarget = 0.0005;
-            const scalar zTol    = 0.0003;
+            // nz=2, zWidth=2mm → expected cell center at z=0.0005 m
+            const scalar zTarget   = 0.0005;
+            const scalar zMatchTol = 1e-9;   // FP match for the chosen plane
+
+            // Pick a SINGLE z-plane: the cell-center z closest to zTarget.
+            // Picking the nearest cell-center z (rather than a tolerance
+            // window |z - zTarget|<zTol) guarantees exactly one plane even
+            // if the mesh ever has multiple cells inside any reasonable
+            // tolerance window.
+            scalar zPlane = zTarget;
+            {
+                scalar bestDz = GREAT;
+                forAll(C, cellI)
+                {
+                    const scalar zi = C[cellI].z();
+                    const scalar dz = mag(zi - zTarget);
+                    if (dz < bestDz)
+                    {
+                        bestDz = dz;
+                        zPlane = zi;
+                    }
+                }
+                reduce(zPlane, minOp<scalar>());  // deterministic agreement across procs
+            }
 
             DynamicList<label> midCells;
             forAll(C, cellI)
             {
-                if (mag(C[cellI].z() - zTarget) < zTol)
+                if (mag(C[cellI].z() - zPlane) < zMatchTol)
                 {
                     midCells.append(cellI);
                 }
@@ -308,7 +329,7 @@ functions
                     forAll(faceCentres, fi)
                     {
                         // Only consider faces near the mid-plane
-                        if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+                        if (mag(faceCentres[fi].z() - zPlane) > zMatchTol) continue;
                         double dx = cx - faceCentres[fi].x();
                         double dy = cy - faceCentres[fi].y();
                         double dist = std::sqrt(dx*dx + dy*dy);
@@ -356,7 +377,7 @@ functions
 
                 forAll(faceCentres, fi)
                 {
-                    if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+                    if (mag(faceCentres[fi].z() - zPlane) > zMatchTol) continue;
 
                     double fx = faceCentres[fi].x();
                     double fy = faceCentres[fi].y();
@@ -386,7 +407,7 @@ functions
                 {
                     forAll(faceCentres, fi)
                     {
-                        if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+                        if (mag(faceCentres[fi].z() - zPlane) > zMatchTol) continue;
 
                         double fx = faceCentres[fi].x();
                         double fy = faceCentres[fi].y();

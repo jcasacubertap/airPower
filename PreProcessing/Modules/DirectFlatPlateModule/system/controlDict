@@ -99,14 +99,35 @@ functions
             const word fmt = d.lookupOrDefault<word>("outputFormat", "csv");
             const bool wallExtrap = d.lookupOrDefault<bool>("wallExtrapolation", false);
 
-            const scalar zTarget = 0.0;
-            const scalar zTol    = 1e-3;
+            const scalar zTarget   = 0.0;
+            const scalar zMatchTol = 1e-9;   // FP match for the chosen plane
 
-            // Collect cells on the mid-plane
+            // Pick a SINGLE z-plane: the cell-center z closest to zTarget.
+            // Picking the nearest cell-center z (rather than a tolerance
+            // window |z|<zTol) guarantees exactly one plane even on 2D-
+            // extruded meshes that put multiple cells inside any reasonable
+            // tolerance window (e.g. 2 cells in z at ±dz/2).
+            scalar zPlane = zTarget;
+            {
+                scalar bestDz = GREAT;
+                forAll(C, cellI)
+                {
+                    const scalar zi = C[cellI].z();
+                    const scalar dz = mag(zi - zTarget);
+                    if (dz < bestDz)
+                    {
+                        bestDz = dz;
+                        zPlane = zi;
+                    }
+                }
+                reduce(zPlane, minOp<scalar>());  // deterministic agreement across procs
+            }
+
+            // Collect cells whose center is on this single plane (FP match).
             DynamicList<label> cells;
             forAll(C, cellI)
             {
-                if (mag(C[cellI].z() - zTarget) < zTol)
+                if (mag(C[cellI].z() - zPlane) < zMatchTol)
                 {
                     cells.append(cellI);
                 }
@@ -134,7 +155,7 @@ functions
 
                     forAll(faceCentres, fi)
                     {
-                        if (mag(faceCentres[fi].z() - zTarget) > zTol) continue;
+                        if (mag(faceCentres[fi].z() - zPlane) > zMatchTol) continue;
                         wallFaces.append(fi);
                         wallP.append(pw[fi]);
                     }
