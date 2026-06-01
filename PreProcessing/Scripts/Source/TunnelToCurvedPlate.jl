@@ -213,7 +213,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
             end
             # Julia-side derivatives of the OF output (BL metrics + aero forces)
-            ops_src = joinpath(root, "PostProcessing", "OperationScripts", "Source")
+            ops_src = joinpath(root, "PreProcessing", "Scripts", "OperationScripts", "Source")
             @info "  → BL integral metrics"
             run(`julia $(joinpath(ops_src, "blMetrics.jl")) $airfoil_case`)
             @info "  → aerodynamic forces"
