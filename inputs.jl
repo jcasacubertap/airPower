@@ -32,23 +32,23 @@ const inp = (
     # ======================================================================
     DFP = (
         # Domain geometry 
-        domainLength = 0.650, # [m]
-        domainHeight = 0.020, # [m]
+        domainLength = 0.398763, # [m]
+        domainHeight = 0.020046, # [m]
 
         # Inflow parameters
-        Uinf   = 12.417927662146404,    # chordwise velocity [m/s]
-        Winf   = 20.59,                 # spanwise velocity [m/s]
-        xInlet = 0.046694057793992,     # inlet position (distance from virtual LE) [m]
+        Uinf   = 15.10,                 # chordwise velocity [m/s]
+        Winf   = 18.7379374199,         # spanwise velocity [m/s]
+        xInlet = 0.04684993006,         # inlet position (distance from virtual LE) [m]
 
         # Top-boundary pressure polynomial (Casacuberta et al, 2022)
-        pa4 = 0.004709401639645,
-        pa3 = 0.059408065736933,
-        pa2 = 0.245222700832888,
-        pa1 = 0.657504955493668,
-        pa0 = 2.006271563747756,
+        pa4 = 0.002343802682877,
+        pa3 = 0.037696164789990,
+        pa2 = 0.175152760791389,
+        pa1 = 0.530290605857447,
+        pa0 = 1.857425373851459,
 
         # Fluid properties
-        freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
+        freeStreamViscosity = 1.472e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
         gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
@@ -70,7 +70,7 @@ const inp = (
         ),
 
         # Output settings
-        outputFormat = "csv",           # csv | binary
+        outputFormat = "bin",           # csv | binary
         wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
@@ -139,7 +139,7 @@ const inp = (
             gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
             # Export / post-processing
-            outputFormat = "csv",       # csv | binary
+            outputFormat = "bin",       # csv | binary
             exportMode   = "partial",   # full | partial
             xiInlet      = 0.02,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
@@ -149,14 +149,14 @@ const inp = (
             # Aerodynamic forces — integrate static pressure and wall shear
             # stress over a wall arclength range defined by chord fractions
             # [xiStart, xiEnd]. Consumed by
-            # PostProcessing/OperationScripts/Source/aeroForces.jl.
+            # PreProcessing/Scripts/OperationScripts/Source/aeroForces.jl.
             aeroForces = (
                 xiStart = 0.05,
                 xiEnd   = 0.30,
             ),
 
             # Boundary-layer integral metrics (consumed by
-            # PostProcessing/OperationScripts/Source/blMetrics.jl)
+            # PreProcessing/Scripts/OperationScripts/Source/blMetrics.jl)
             blMetrics = (
                 # method — one of:
                 #   "vorticityIntegralTrapezoidal"  trapezoidal sum between cell centres
@@ -199,7 +199,7 @@ const inp = (
             Nfit         = 4,             # polynomial order
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
         ),
-        valPlot = true,   # true: overlay reference data on validation plots
+        valPlot = false,   # true: overlay reference data on validation plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
         Case    = 1,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
     ),
