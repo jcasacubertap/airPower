@@ -63,6 +63,14 @@ functions
         writeControl         writeTime;
     }
 
+    vorticity
+    {
+        type            vorticity;
+        libs            ("libfieldFunctionObjects.so");
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
+
     writeMidPlane
     {
         type            coded;
@@ -84,6 +92,10 @@ functions
                 mesh.lookupObject<volVectorField>("U");
             const volScalarField& p =
                 mesh.lookupObject<volScalarField>("p");
+            // Vorticity (volVectorField; only ω_z is meaningful on the 2D
+            // mid-plane). Mirrors TTCP/AirfoilLECase output schema.
+            const volVectorField& vort =
+                mesh.lookupObject<volVectorField>("vorticity");
             const vectorField& C = mesh.C();
 
             // Read output format from inputParam
@@ -144,6 +156,7 @@ functions
             // producing the same kind of artifacts seen in AirfoilLECase.
             DynamicList<label> wallFaces;
             DynamicList<scalar> wallP;
+            DynamicList<scalar> wallOmz;
             if (wallExtrap)
             {
                 label patchID = mesh.boundaryMesh().findPatchID("plate");
@@ -152,12 +165,17 @@ functions
                     const polyPatch& pp = mesh.boundaryMesh()[patchID];
                     const vectorField faceCentres(pp.faceCentres());  // copy to avoid dangling ref
                     const fvPatchScalarField& pw = p.boundaryField()[patchID];
+                    // BC value of vorticity at the wall — for a no-slip patch
+                    // OpenFOAM computes this as curl(U) at the boundary face,
+                    // which equals -∂u/∂y (the wall shear gradient).
+                    const fvPatchVectorField& vortW = vort.boundaryField()[patchID];
 
                     forAll(faceCentres, fi)
                     {
                         if (mag(faceCentres[fi].z() - zPlane) > zMatchTol) continue;
                         wallFaces.append(fi);
                         wallP.append(pw[fi]);
+                        wallOmz.append(vortW[fi].z());
                     }
 
                     Info<< "writeMidPlane: wall extrapolation — "
@@ -176,7 +194,7 @@ functions
                 const fileName fpath = outDir/"midPlane.bin";
                 std::ofstream ofs(fpath, std::ios::binary);
 
-                int32_t nCols = 7;
+                int32_t nCols = 8;
                 int64_t nRows = totalRows;
                 ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
                 ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
@@ -185,16 +203,16 @@ functions
                 forAll(cells, i)
                 {
                     const label ci = cells[i];
-                    double row[7] =
+                    double row[8] =
                     {
                         C[ci].x(), C[ci].y(), C[ci].z(),
                         U[ci].x(), U[ci].y(), U[ci].z(),
-                        p[ci]
+                        p[ci], vort[ci].z()
                     };
                     ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
                 }
 
-                // Wall points (u=v=w=0, p extrapolated)
+                // Wall points (u=v=w=0, p and omz from BC)
                 if (wallExtrap)
                 {
                     label patchID = mesh.boundaryMesh().findPatchID("plate");
@@ -202,11 +220,11 @@ functions
                     forAll(wallFaces, i)
                     {
                         label fi = wallFaces[i];
-                        double row[7] =
+                        double row[8] =
                         {
                             fc[fi].x(), fc[fi].y(), fc[fi].z(),
                             0.0, 0.0, 0.0,
-                            wallP[i]
+                            wallP[i], wallOmz[i]
                         };
                         ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
                     }
@@ -222,7 +240,7 @@ functions
                 // analysis — write at max double precision (17 digits is the
                 // round-trip-safe value for IEEE 754 binary64).
                 os.precision(17);
-                os << "x,y,z,u,v,w,p" << nl;
+                os << "x,y,z,u,v,w,p,omz" << nl;
 
                 // Interior cells
                 forAll(cells, i)
@@ -234,10 +252,11 @@ functions
                         << U[ci].x() << ","
                         << U[ci].y() << ","
                         << U[ci].z() << ","
-                        << p[ci] << nl;
+                        << p[ci]     << ","
+                        << vort[ci].z() << nl;
                 }
 
-                // Wall points (u=v=w=0, p extrapolated)
+                // Wall points (u=v=w=0, p and omz from BC)
                 if (wallExtrap)
                 {
                     label patchID = mesh.boundaryMesh().findPatchID("plate");
@@ -251,7 +270,8 @@ functions
                             << 0.0 << ","
                             << 0.0 << ","
                             << 0.0 << ","
-                            << wallP[i] << nl;
+                            << wallP[i] << ","
+                            << wallOmz[i] << nl;
                     }
                 }
 
