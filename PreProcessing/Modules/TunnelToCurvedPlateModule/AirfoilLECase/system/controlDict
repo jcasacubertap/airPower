@@ -588,7 +588,10 @@ functions
                 else
                 {
                     OFstream os(outDir/"midPlane.csv");
-                    os.precision(10);
+                    // midPlane is the base flow for downstream linear-stability
+                    // analysis — write at max double precision (17 digits is the
+                    // round-trip-safe value for IEEE 754 binary64).
+                    os.precision(17);
                     os << "x,y,z,u,v,w,p,omz" << nl;
 
                     // Interior cells
