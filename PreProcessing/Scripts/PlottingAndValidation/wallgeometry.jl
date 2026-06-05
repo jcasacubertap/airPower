@@ -264,9 +264,15 @@ function plot_airfoil_bump_check(; savedir::AbstractString,
     s_arr  = Float64.(raw[:, 6])             # [mm]
     h_arr  = Float64.(raw[:, 7])             # [mm]
 
-    # Locate the bump support by point-wise displacement
+    # Locate the bump support by point-wise displacement.
+    # Threshold = yTol so the reported "width" annotation corresponds to the
+    # truncated-base extent (= R·|A| in arclength), not the truncated base
+    # plus the smooth blend tail. For ESN this matches the user's mental
+    # model of "where the bump starts/ends". For sigmoidal it excludes the
+    # outer ends of the smoothstep where |h| < yTol (a small effect for
+    # typical A/yTol ratios).
     disp = hypot.(x_bump .- x_orig, y_bump .- y_orig)
-    idx_bump = findall(d -> d > 1e-9, disp)
+    idx_bump = findall(d -> d > inp.wallModulation.yTol, disp)
 
     common = (
         aspect_ratio = :equal,
