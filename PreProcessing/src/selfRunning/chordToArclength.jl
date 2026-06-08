@@ -2,14 +2,14 @@
 #
 # Convert chord percentage to arclength S, with two modes:
 #
-#   DFP   - read .mat from InputOutput/AirfoilFlowData/
+#   DFP   - read .mat from io/airfoilFlowData/
 #           (file picked by inp.VAL.externalToScaling.flowDataFile).
 #           Uses the precomputed BL.x, BL.S, BL.c table — same data the
 #           DFP solver consumes, so the resulting S is consistent with
 #           what DFP sees internally.
 #           Output adds xCenter = S - inp.DFP.xInlet (DFP-domain coord).
 #
-#   TTCP  - read .dat from InputOutput/AirfoilGeometryData/
+#   TTCP  - read .dat from io/airfoilGeometryData/
 #           (file picked by inp.TTCP.tunnel.airfoilFile). Integrates the
 #           upper-surface arclength on the fly from the Selig-format
 #           airfoil coordinates, scaled by inp.TTCP.tunnel.chord. This
