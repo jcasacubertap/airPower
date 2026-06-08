@@ -1,0 +1,227 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "../constant/inputParam"
+
+convertToMeters 0.001;
+
+// Domain dimensions [m -> mm for convertToMeters 0.001]
+Lm   ${Upinlet.domainLength};
+Hm   ${Upinlet.domainHeight};
+L    #calc "$Lm * 1000.0";
+H    #calc "$Hm * 1000.0";
+
+// Block x-positions (fixed proportions)
+x0   0;
+x1   #calc "3.0/13.0 * $L";
+x2   #calc "7.0/26.0 * $L";
+x3   #calc "9.0/26.0 * $L";
+x4   #calc "5.0/13.0 * $L";
+x5   #calc "11.0/13.0 * $L";
+x6   $L;
+
+// Block y-positions (50/50 split)
+y1   #calc "0.5 * $H";
+y2   $H;
+
+// Wall vertex y-displacements from wall modulation [mm]
+yw0  ${wallMod.y0};
+yw1  ${wallMod.y1};
+yw2  ${wallMod.y2};
+yw3  ${wallMod.y3};
+yw4  ${wallMod.y4};
+yw5  ${wallMod.y5};
+yw6  ${wallMod.y6};
+
+// Spanwise [mm] (quasi-2D, cyclic)
+z0   -1;
+z1    1;
+
+vertices
+(
+($x0 $yw0 $z0)      // 0
+($x1 $yw1 $z0)      // 1
+($x2 $yw2 $z0)      // 2
+($x3 $yw3 $z0)      // 3
+($x4 $yw4 $z0)      // 4
+($x5 $yw5 $z0)      // 5
+($x6 $yw6 $z0)      // 6
+($x0 $y1 $z0)       // 7
+($x1 $y1 $z0)       // 8
+($x2 $y1 $z0)       // 9
+($x3 $y1 $z0)       // 10
+($x4 $y1 $z0)       // 11
+($x5 $y1 $z0)       // 12
+($x6 $y1 $z0)       // 13
+($x0 $y2 $z0)       // 14
+($x1 $y2 $z0)       // 15
+($x2 $y2 $z0)       // 16
+($x3 $y2 $z0)       // 17
+($x4 $y2 $z0)       // 18
+($x5 $y2 $z0)       // 19
+($x6 $y2 $z0)       // 20
+($x0 $yw0 $z1)      // 21
+($x1 $yw1 $z1)      // 22
+($x2 $yw2 $z1)      // 23
+($x3 $yw3 $z1)      // 24
+($x4 $yw4 $z1)      // 25
+($x5 $yw5 $z1)      // 26
+($x6 $yw6 $z1)      // 27
+($x0 $y1 $z1)       // 28
+($x1 $y1 $z1)       // 29
+($x2 $y1 $z1)       // 30
+($x3 $y1 $z1)       // 31
+($x4 $y1 $z1)       // 32
+($x5 $y1 $z1)       // 33
+($x6 $y1 $z1)       // 34
+($x0 $y2 $z1)       // 35
+($x1 $y2 $z1)       // 36
+($x2 $y2 $z1)       // 37
+($x3 $y2 $z1)       // 38
+($x4 $y2 $z1)       // 39
+($x5 $y2 $z1)       // 40
+($x6 $y2 $z1)       // 41
+);
+// Cell counts (computed by Julia from nx_base * gridXfactor and 120/40 * gridYfactor)
+Nx1  ${wallMod.Nx1};
+Nx2  ${wallMod.Nx2};
+Nx3  ${wallMod.Nx3};
+Nx4  ${wallMod.Nx4};
+Nx5  ${wallMod.Nx5};
+Nx6  ${wallMod.Nx6};
+NyB  ${wallMod.NyB};
+NyT  ${wallMod.NyT};
+
+blocks
+(
+//Block 1: inlet bottom
+hex (0 1 8 7 21 22 29 28) ($Nx1 $NyB 2) simpleGrading (1 18 1)
+//Block 2: pre-central region bottom
+hex (1 2 9 8 22 23 30 29) ($Nx2 $NyB 2) simpleGrading (1 18 1)
+//Block 3: central region bottom
+hex (2 3 10 9 23 24 31 30) ($Nx3 $NyB 2) simpleGrading (1 18 1)
+//Block 4: post-central region bottom
+hex (3 4 11 10 24 25 32 31) ($Nx4 $NyB 2) simpleGrading (1 18 1)
+//Block 5: main downstream region bottom
+hex (4 5 12 11 25 26 33 32) ($Nx5 $NyB 2) simpleGrading (1 18 1)
+//Block 6: outflow region bottom
+hex (5 6 13 12 26 27 34 33) ($Nx6 $NyB 2) simpleGrading (1 18 1)
+
+//Block 7: inlet top
+hex (7 8 15 14 28 29 36 35) ($Nx1 $NyT 2) simpleGrading (1 1 1)
+//Block 8: pre-central region top
+hex (8 9 16 15 29 30 37 36) ($Nx2 $NyT 2) simpleGrading (1 1 1)
+//Block 9: central region top
+hex (9 10 17 16 30 31 38 37) ($Nx3 $NyT 2) simpleGrading (1 1 1)
+//Block 10: post-central region top
+hex (10 11 18 17 31 32 39 38) ($Nx4 $NyT 2) simpleGrading (1 1 1)
+//Block 11: main downstream region top
+hex (11 12 19 18 32 33 40 39) ($Nx5 $NyT 2) simpleGrading (1 1 1)
+//Block 12: outflow region top
+hex (12 13 20 19 33 34 41 40) ($Nx6 $NyT 2) simpleGrading (1 1 1)
+);
+edges
+(
+    #include "../constant/wallEdges"
+);
+boundary
+(
+    top
+    {
+        type    patch;
+        faces
+        (
+            (14 15 36 35)
+            (15 16 37 36)
+            (16 17 38 37)
+            (17 18 39 38)
+            (18 19 40 39)
+            (19 20 41 40)
+        );
+    }
+    inlet
+    {
+        type    patch;
+        faces
+        (
+            (0 7 28 21)
+            (7 14 35 28)
+        );
+    }
+    outlet
+    {
+        type    patch;
+        faces
+        (
+            (6 27 34 13)
+            (13 34 41 20)
+        );
+    }
+    plate
+    {
+        type    wall;
+        faces
+        (
+            (0 21 22 1)
+            (1 22 23 2)
+            (2 23 24 3)
+            (3 24 25 4)
+            (4 25 26 5)
+            (5 26 27 6)
+        );
+    }
+    front
+    {
+        type    cyclic;
+        neighbourPatch  back;
+        faces
+        (
+            (0 1 8 7)
+            (1 2 9 8)
+            (2 3 10 9)
+            (3 4 11 10)
+            (4 5 12 11)
+            (5 6 13 12)
+            (7 8 15 14)
+            (8 9 16 15)
+            (9 10 17 16)
+            (10 11 18 17)
+            (11 12 19 18)
+            (12 13 20 19)
+        );
+    }
+    back
+    {
+        type    cyclic;
+        neighbourPatch  front;
+        faces
+        (
+            (28 29 22 21)
+            (29 30 23 22)
+            (30 31 24 23)
+            (31 32 25 24)
+            (32 33 26 25)
+            (33 34 27 26)
+            (35 36 29 28)
+            (36 37 30 29)
+            (37 38 31 30)
+            (38 39 32 31)
+            (39 40 33 32)
+            (40 41 34 33)
+        );
+    }
+);

@@ -1,0 +1,39 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2.2.1                                 |
+|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     6.0;
+    format      ascii;
+    class       dictionary;
+    object      topoSetDict;
+}
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+actions
+(      
+  // Band of thickness H around the foil (in metres)
+  {
+    name   nearFoilH;
+    type   cellSet;
+    action new;
+    source fieldToCell;
+    sourceInfo
+    {
+      field surfaceDistance;   // <-- the field written by distToFoil
+      min   0;
+      max   0.2;              // H in metres
+    }
+  }
+);
+
+
+
+// ************************************************************************* //
+
+

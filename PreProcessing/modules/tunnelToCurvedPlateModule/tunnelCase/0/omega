@@ -1,0 +1,69 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2412                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "../constant/inputParam"
+
+Uinf            ${flowParam.freeStreamVelocityStreamwise};
+Winf            ${flowParam.freeStreamVelocitySpanwise};
+Ti              ${flowParam.turbulenceIntensity};
+Lt              ${flowParam.turbLengthScale};
+
+Umag            #calc "sqrt($Uinf*$Uinf + $Winf*$Winf)";
+omegaInlet      #calc "sqrt(1.5 * pow($Umag * $Ti, 2)) / (pow(0.09, 0.25) * $Lt)";
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform $omegaInlet;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           $internalField;
+    }
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
+    }
+    airfoil
+    {
+        type            omegaWallFunction;
+        value           $internalField;
+    }
+    left
+    {
+        type            cyclic;
+    }
+    right
+    {
+        type            cyclic;
+    }
+    upperWall
+    {
+        type            omegaWallFunction;
+        value           $internalField;
+    }
+    lowerWall
+    {
+        type            omegaWallFunction;
+        value           $internalField;
+    }
+}
+
+// ************************************************************************* //

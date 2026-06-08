@@ -1,0 +1,11 @@
+#!/bin/sh
+
+#load clean function
+. $WM_PROJECT_DIR/bin/tools/CleanFunctions
+
+cleanTimeDirectories
+rm -rf processor*
+rm -rf postProcessing
+rm -rf dynamicCode
+rm -rf 2.bak
+

@@ -12,7 +12,7 @@ const inp = (
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = false,            # true to activate the bump
+        enabled = false,           # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
         A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
@@ -70,7 +70,7 @@ const inp = (
         ),
 
         # Output settings
-        outputFormat = "bin",           # csv | binary
+        outputFormat = "csv",           # csv | binary
         wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
@@ -139,7 +139,7 @@ const inp = (
             gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
             # Export / post-processing
-            outputFormat = "bin",       # csv | binary
+            outputFormat = "binary",       # csv | binary
             exportMode   = "partial",   # full | partial
             xiInlet      = 0.02,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
@@ -199,9 +199,9 @@ const inp = (
             Nfit         = 4,             # polynomial order
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
         ),
-        valPlot = false,   # true: overlay reference data on validation plots
+        valPlot = true,   # true: overlay reference data on validation plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
-        Case    = 1,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
+        Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
     ),
 
 )
