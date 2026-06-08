@@ -188,10 +188,18 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             @info "Post-processing DirectFlatPlate..."
             if backend == DOCKER
                 work = "/tmp/DFP_post"
+                # Stash solverInfo before clearing postProcessing/, then
+                # restore it after -postProcess (which writes only a stub
+                # solverInfo because it does not iterate). All other
+                # function-object outputs are regenerated freshly.
+                stash="/tmp/_solverInfo_save_DFP"
                 foam_exec(backend, case_dir,
                     "rm -rf $work && cp -r . $work && cd $work" *
+                    " && rm -rf $stash" *
+                    " && [ -d postProcessing/solverInfo ] && mv postProcessing/solverInfo $stash || true" *
                     " && rm -rf dynamicCode postProcessing" *
-                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | grep -v '^0\$' | sort -g | tail -1)\"")
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | grep -v '^0\$' | sort -g | tail -1)\"" *
+                    " && if [ -d $stash ]; then rm -rf postProcessing/solverInfo && mv $stash postProcessing/solverInfo; fi")
                 pp_dest = joinpath(case_dir, "postProcessing")
                 rm(pp_dest; force=true, recursive=true)
                 run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)

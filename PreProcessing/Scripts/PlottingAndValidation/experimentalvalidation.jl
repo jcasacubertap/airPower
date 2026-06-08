@@ -54,7 +54,7 @@ function plot_experimental_validation(case_path::AbstractString;
     x_of = Float64[]; y_of = Float64[]; w_of = Float64[]
     for line in lines[2:end]
         fields = split(line, ',')
-        length(fields) == 7 || continue
+        length(fields) >= 7 || continue
         vals = tryparse.(Float64, fields)
         any(isnothing, vals) && continue
         push!(x_of, vals[1]); push!(y_of, vals[2]); push!(w_of, vals[6])

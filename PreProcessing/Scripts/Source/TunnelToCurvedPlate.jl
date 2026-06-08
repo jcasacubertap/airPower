@@ -159,6 +159,13 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     run(`docker cp $(DOCKER_CONTAINER):$latest $(tunnel_case)/`)
                     @info "Copied time directory: $(basename(latest))"
                 end
+                # Preserve the live solver's postProcessing/ (solverInfo,
+                # surfaces, sampling, ...) so :vizTunnel can read it later.
+                # -postProcess can't regenerate solverInfo since it doesn't
+                # iterate. Clear-and-overwrite mirrors :postAirfoil.
+                pp_dest = joinpath(tunnel_case, "postProcessing")
+                rm(pp_dest; force=true, recursive=true)
+                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`))
                 foam_exec(backend, tunnel_case, "rm -rf $work")
             else
                 foam_script(backend, tunnel_case, "run", "$(inp.TTCP.nProcs)")
@@ -188,6 +195,13 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     run(`docker cp $(DOCKER_CONTAINER):$t $(airfoil_case)/`)
                     @info "Copied time directory: $(basename(t))"
                 end
+                # Preserve the live solver's postProcessing/ (solverInfo
+                # especially — -postProcess in :postAirfoil cannot regenerate
+                # it since it doesn't iterate). Clear-and-overwrite mirrors
+                # :postAirfoil.
+                pp_dest = joinpath(airfoil_case, "postProcessing")
+                rm(pp_dest; force=true, recursive=true)
+                run(ignorestatus(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`))
                 foam_exec(backend, airfoil_case, "rm -rf $work")
             else
                 foam_script(backend, airfoil_case, "run", "$(inp.TTCP.nProcs)")
@@ -199,10 +213,19 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             @info "Post-processing AirfoilLECase..."
             if backend == DOCKER
                 work = "/tmp/AirfoilLECase_post"
+                # Stash solverInfo before clearing postProcessing/, then
+                # restore it after -postProcess (which writes only a stub
+                # solverInfo because it does not iterate). All other
+                # function-object outputs (midPlane, wall*, etc.) are
+                # regenerated freshly.
+                stash="/tmp/_solverInfo_save_AirfoilLE"
                 foam_exec(backend, airfoil_case,
                     "rm -rf $work && cp -r . $work && cd $work" *
+                    " && rm -rf $stash" *
+                    " && [ -d postProcessing/solverInfo ] && mv postProcessing/solverInfo $stash || true" *
                     " && rm -rf dynamicCode postProcessing" *
-                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
+                    " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"" *
+                    " && if [ -d $stash ]; then rm -rf postProcessing/solverInfo && mv $stash postProcessing/solverInfo; fi")
                 pp_dest = joinpath(airfoil_case, "postProcessing")
                 rm(pp_dest; force=true, recursive=true)
                 run(`docker cp $(DOCKER_CONTAINER):$work/postProcessing $pp_dest`)
@@ -224,14 +247,14 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         :vizTunnel => () -> begin
             plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
                                        "TunnelToCurvedPlate")
-            return plot_residuals(tunnel_case; savedir=plotting_dir, label="TunnelCase")
+            return plot_residuals(tunnel_case; savedir=plotting_dir, label="TunnelCaseFinal")
         end,
 
         :vizAirfoil => () -> begin
             plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
                                        "TunnelToCurvedPlate")
 
-            res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECase")
+            res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECaseFinal")
             a = inp.TTCP.airfoilLE
             geom_args = (chord_mm=t.chord * 1000, alpha_deg=t.alphaDeg,
                          x_center_mm=t.xCenter * 1000, y_center_mm=t.yCenter * 1000)
@@ -252,6 +275,8 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :monitorTunnel => () -> begin
+            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
+                                       "TunnelToCurvedPlate")
             if backend == DOCKER
                 tmp_dir = mktempdir()
                 dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
@@ -265,16 +290,17 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                 if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
                     cp(f0, fd; force=true)
                 end
-                p = plot_residuals(tmp_dir; savedir=tmp_dir, label="TunnelCase (live)")
+                p = plot_residuals(tmp_dir; savedir=plotting_dir, label="TunnelCaseTemporal")
                 rm(tmp_dir; force=true, recursive=true)
             else
-                p = plot_residuals(tunnel_case; savedir=mktempdir(), label="TunnelCase (live)")
+                p = plot_residuals(tunnel_case; savedir=plotting_dir, label="TunnelCaseTemporal")
             end
-            display(p)
             return p
         end,
 
         :monitorAirfoil => () -> begin
+            plotting_dir = joinpath(root, "PreProcessing", "InputOutput", "Plotting",
+                                       "TunnelToCurvedPlate")
             if backend == DOCKER
                 tmp_dir = mktempdir()
                 dst = joinpath(tmp_dir, "postProcessing", "solverInfo", "0")
@@ -288,12 +314,11 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                 if isfile(f0) && (!isfile(fd) || filesize(fd) < filesize(f0))
                     cp(f0, fd; force=true)
                 end
-                p = plot_residuals(tmp_dir; savedir=tmp_dir, label="AirfoilLECase (live)")
+                p = plot_residuals(tmp_dir; savedir=plotting_dir, label="AirfoilLECaseTemporal")
                 rm(tmp_dir; force=true, recursive=true)
             else
-                p = plot_residuals(airfoil_case; savedir=mktempdir(), label="AirfoilLECase (live)")
+                p = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECaseTemporal")
             end
-            display(p)
             return p
         end,
 
