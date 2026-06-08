@@ -89,8 +89,8 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
     case_dir = joinpath(root, "PreProcessing", "modules",
                         "directFlatPlateModule")
 
-    flow_data_dir = joinpath(root, "PreProcessing", "inputOutput", "airfoilFlowData")
-    plotting_dir  = joinpath(root, "PreProcessing", "inputOutput", "plotting",
+    flow_data_dir = joinpath(root, "PreProcessing", "io", "airfoilFlowData")
+    plotting_dir  = joinpath(root, "PreProcessing", "io", "plotting",
                              "directFlatPlate")
 
     return Dict{Symbol, Function}(

@@ -19,7 +19,7 @@ function plot_experimental_validation(case_path::AbstractString;
                                       delta::Float64=0.010,
                                       strip_width::Float64=0.005)
     # ── Discover experimental stations ──
-    val_dir = joinpath(ROOT, "PreProcessing", "inputOutput", "Validation",
+    val_dir = joinpath(ROOT, "PreProcessing", "io", "Validation",
                        "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
         @warn "Validation directory not found: $val_dir"

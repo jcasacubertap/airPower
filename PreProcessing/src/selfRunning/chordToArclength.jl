@@ -59,7 +59,7 @@ end
 
 if mode == "DFP"
     using MAT
-    flow_dir = joinpath(ROOT, "PreProcessing", "inputOutput", "airfoilFlowData")
+    flow_dir = joinpath(ROOT, "PreProcessing", "io", "airfoilFlowData")
     fname    = inp.VAL.externalToScaling.flowDataFile
     mat_path = joinpath(flow_dir, fname)
     isfile(mat_path) || error(
@@ -88,7 +88,7 @@ if mode == "DFP"
     println("Note: xCenter is in DFP domain coordinates (x=0 at inlet).")
 
 else  # TTCP
-    geom_dir = joinpath(ROOT, "PreProcessing", "inputOutput", "airfoilGeometryData")
+    geom_dir = joinpath(ROOT, "PreProcessing", "io", "airfoilGeometryData")
     fname    = inp.TTCP.tunnel.airfoilFile
     dat_path = joinpath(geom_dir, fname)
     isfile(dat_path) || error(

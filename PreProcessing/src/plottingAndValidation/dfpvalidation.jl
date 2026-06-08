@@ -15,7 +15,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
                                gen::Int=0,
                                case_id::Int=0)
     # ── Load reference data for S ↔ x mapping ──
-    flow_data_dir = joinpath(ROOT, "PreProcessing", "inputOutput", "airfoilFlowData")
+    flow_data_dir = joinpath(ROOT, "PreProcessing", "io", "airfoilFlowData")
     mat_files = filter(f -> endswith(f, ".mat"), readdir(flow_data_dir))
     if isempty(mat_files)
         @warn "No .mat files found in $flow_data_dir"
@@ -28,7 +28,7 @@ function plot_dfp_w_validation(case_path::AbstractString;
     xInlet = inp.DFP.xInlet
 
     # ── Discover experimental stations ──
-    val_dir = joinpath(ROOT, "PreProcessing", "inputOutput", "Validation",
+    val_dir = joinpath(ROOT, "PreProcessing", "io", "Validation",
                        "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
         @warn "Validation directory not found: $val_dir"

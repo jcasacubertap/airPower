@@ -9,11 +9,11 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
 
     tunnel_case   = joinpath(tunnel_to_curved, "tunnelCase")
     airfoil_case  = joinpath(tunnel_to_curved, "airfoilLECase")
-    generate_grid = joinpath(root, "PreProcessing", "scripts", "selfRunning", "generateGrid.jl")
+    generate_grid = joinpath(root, "PreProcessing", "src", "selfRunning", "generateGrid.jl")
     map_script    = joinpath(tunnel_to_curved, "mapTunnelToAirfoilLE.jl")
 
-    airfoil_data_dir = joinpath(root, "PreProcessing", "inputOutput", "airfoilGeometryData")
-    airfoil2stl      = joinpath(root, "PreProcessing", "scripts", "selfRunning", "airfoil2stl.sh")
+    airfoil_data_dir = joinpath(root, "PreProcessing", "io", "airfoilGeometryData")
+    airfoil2stl      = joinpath(root, "PreProcessing", "src", "selfRunning", "airfoil2stl.sh")
     tri_surface_dir  = joinpath(tunnel_case, "constant", "triSurface")
 
     t = inp.TTCP.tunnel
@@ -131,7 +131,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             # bumpCheck.csv inside the airfoil case dir).
             wm = merge(inp.wallModulation, inp.TTCP.airfoilLE.wallModulation)
             if wm.enabled
-                plotting_dir = joinpath(root, "PreProcessing", "inputOutput",
+                plotting_dir = joinpath(root, "PreProcessing", "io",
                                         "plotting", "tunnelToCurvedPlate")
                 plot_airfoil_bump_check(;
                     savedir  = plotting_dir,
@@ -236,7 +236,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     " && simpleFoam -postProcess -time \"\$(ls -1d [0-9]* | sort -g | tail -1)\"")
             end
             # Julia-side derivatives of the OF output (BL metrics + aero forces)
-            ops_src = joinpath(root, "PreProcessing", "scripts", "operationScripts", "source")
+            ops_src = joinpath(root, "PreProcessing", "src", "operationScripts", "source")
             @info "  → BL integral metrics"
             run(`julia $(joinpath(ops_src, "blMetrics.jl")) $airfoil_case`)
             @info "  → aerodynamic forces"
@@ -245,13 +245,13 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :vizTunnel => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "inputOutput", "plotting",
+            plotting_dir = joinpath(root, "PreProcessing", "io", "plotting",
                                        "tunnelToCurvedPlate")
             return plot_residuals(tunnel_case; savedir=plotting_dir, label="TunnelCaseFinal")
         end,
 
         :vizAirfoil => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "inputOutput", "plotting",
+            plotting_dir = joinpath(root, "PreProcessing", "io", "plotting",
                                        "tunnelToCurvedPlate")
 
             res_airfoil = plot_residuals(airfoil_case; savedir=plotting_dir, label="AirfoilLECaseFinal")
@@ -275,7 +275,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :monitorTunnel => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "inputOutput", "plotting",
+            plotting_dir = joinpath(root, "PreProcessing", "io", "plotting",
                                        "tunnelToCurvedPlate")
             if backend == DOCKER
                 tmp_dir = mktempdir()
@@ -299,7 +299,7 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
         end,
 
         :monitorAirfoil => () -> begin
-            plotting_dir = joinpath(root, "PreProcessing", "inputOutput", "plotting",
+            plotting_dir = joinpath(root, "PreProcessing", "io", "plotting",
                                        "tunnelToCurvedPlate")
             if backend == DOCKER
                 tmp_dir = mktempdir()

@@ -494,7 +494,7 @@ function write_airfoil_le_input_param(case_dir::AbstractString)
 
     # Load upper-surface airfoil data from the .dat file
     airfoil_dat = joinpath(dirname(dirname(case_dir)),
-                           "..", "inputOutput", "airfoilGeometryData", t.airfoilFile)
+                           "..", "io", "airfoilGeometryData", t.airfoilFile)
     xi_up, eta_up = load_airfoil_upper(airfoil_dat)
 
     # ── constant/inputParam ──────────────────────────────────────────────

@@ -99,7 +99,7 @@ function plot_wall_geometry(case_path::AbstractString;
     x_ctr   = x_center_mm * 1e-3
     y_ctr   = y_center_mm * 1e-3
 
-    dat_path = joinpath(ROOT, "PreProcessing", "inputOutput", "airfoilGeometryData",
+    dat_path = joinpath(ROOT, "PreProcessing", "io", "airfoilGeometryData",
                         inp.TTCP.tunnel.airfoilFile)
     x_orig = Float64[]
     y_orig = Float64[]

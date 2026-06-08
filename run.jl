@@ -18,16 +18,16 @@ const ROOT = @__DIR__
 include(joinpath(ROOT, "inputs.jl"))
 
 # Include all source files
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "backend.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "backend.jl"))
 
 # Auxiliary functions (must come before source files that use them)
-include(joinpath(ROOT, "PreProcessing", "scripts", "auxiliary", "leastSquares.jl"))
-include(joinpath(ROOT, "PreProcessing", "scripts", "auxiliary", "falknerSkan.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "leastSquares.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "falknerSkan.jl"))
 
 # Plotting & validation (must come before modules that reference plot functions)
 using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings, Statistics
 default(fontfamily = "Computer Modern")
-const PV_DIR = joinpath(ROOT, "PreProcessing", "scripts", "plottingAndValidation")
+const PV_DIR = joinpath(ROOT, "PreProcessing", "src", "plottingAndValidation")
 include(joinpath(PV_DIR, "residuals.jl"))
 include(joinpath(PV_DIR, "fields.jl"))
 include(joinpath(PV_DIR, "profiles.jl"))
@@ -38,12 +38,12 @@ include(joinpath(PV_DIR, "experimentalvalidation.jl"))
 include(joinpath(PV_DIR, "dfpvalidation.jl"))
 
 # External-to-scaling preprocessing
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "externalToScaling.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "externalToScaling.jl"))
 
 # Module definitions and pipeline
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "pipeline.jl"))
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "tunnelToCurvedPlate.jl"))
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "directFlatPlate.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "pipeline.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "tunnelToCurvedPlate.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "directFlatPlate.jl"))
 
 # --- Main ---
 # Only run automatically when called from the command line (julia run.jl ...),

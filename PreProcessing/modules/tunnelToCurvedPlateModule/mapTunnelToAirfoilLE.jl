@@ -640,7 +640,7 @@ function main()
     if clamp_bl
         # Resolve airfoil .dat path (same convention as generateGrid.jl)
         root_dir = dirname(find_ancestor_file(@__DIR__, "inputs.jl"))
-        af_path  = joinpath(root_dir, "PreProcessing", "inputOutput",
+        af_path  = joinpath(root_dir, "PreProcessing", "io",
                             "airfoilGeometryData", t.airfoilFile)
         xi_data, eta_data = load_airfoil_upper(af_path)
         println("  BL clamp enabled (factor=$(a.clampOutletPressureBLFactor))")

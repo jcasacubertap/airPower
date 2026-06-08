@@ -15,7 +15,7 @@ const ROOT = let
     dir
 end
 include(joinpath(ROOT, "inputs.jl"))
-include(joinpath(ROOT, "PreProcessing", "scripts", "source", "backend.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "source", "backend.jl"))
 
 using Plots
 gr()
@@ -75,7 +75,7 @@ vline!(fig, [bump_xs, bump_xp, bump_xe];
     color=:gray, linestyle=:dash, linewidth=0.8, label=false)
 
 # Save
-outdir = joinpath(ROOT, "PreProcessing", "inputOutput", "plotting", "directFlatPlate")
+outdir = joinpath(ROOT, "PreProcessing", "io", "plotting", "directFlatPlate")
 mkpath(outdir)
 outfile = joinpath(outdir, "wallModulationTopology.png")
 savefig(fig, outfile)

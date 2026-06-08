@@ -47,7 +47,7 @@ include(find_ancestor_file(@__DIR__, "inputs.jl"))
 
 # Pure bump-shape math (also used by backend.jl / wallModulationTopology.jl)
 let root = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
-    include(joinpath(root, "PreProcessing", "scripts", "source", "wallModulation.jl"))
+    include(joinpath(root, "PreProcessing", "src", "source", "wallModulation.jl"))
 end
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -95,7 +95,7 @@ end
 # Resolve .dat path from inputs
 const _AIRFOIL_DAT = let
     dir = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
-    joinpath(dir, "PreProcessing", "inputOutput", "airfoilGeometryData", inp.TTCP.tunnel.airfoilFile)
+    joinpath(dir, "PreProcessing", "io", "airfoilGeometryData", inp.TTCP.tunnel.airfoilFile)
 end
 const XI_DATA, ETA_DATA = load_airfoil_upper(_AIRFOIL_DAT)
 
