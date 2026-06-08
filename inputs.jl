@@ -149,14 +149,14 @@ const inp = (
             # Aerodynamic forces — integrate static pressure and wall shear
             # stress over a wall arclength range defined by chord fractions
             # [xiStart, xiEnd]. Consumed by
-            # PreProcessing/Scripts/OperationScripts/Source/aeroForces.jl.
+            # PreProcessing/src/source/aeroForces.jl.
             aeroForces = (
                 xiStart = 0.05,
                 xiEnd   = 0.30,
             ),
 
             # Boundary-layer integral metrics (consumed by
-            # PreProcessing/Scripts/OperationScripts/Source/blMetrics.jl)
+            # PreProcessing/src/source/blMetrics.jl)
             blMetrics = (
                 # method — one of:
                 #   "vorticityIntegralTrapezoidal"  trapezoidal sum between cell centres
