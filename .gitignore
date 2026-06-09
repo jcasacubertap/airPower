@@ -7,10 +7,15 @@
 # Converged simulation data (large, not tracked)
 *_data/
 
-# OpenFOAM runtime data
+# PostProcessing input/reference data (large .mat, loaded at runtime, not tracked)
+PostProcessing/io/fields/*.mat
+PostProcessing/src/validation/*.mat
+
+# OpenFOAM runtime data (scoped to case directories so the top-level
+# PostProcessing/ source tree is not caught on case-insensitive filesystems)
 **/processor[0-9]*/
 **/dynamicCode/
-**/postProcessing/
+PreProcessing/Modules/**/postProcessing/
 **/constant/polyMesh/
 **/constant/extendedFeatureEdgeMesh/
 **/constant/triSurface/
