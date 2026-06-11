@@ -104,7 +104,8 @@ function plot_fields(case_path::AbstractString;
                      alpha_deg::Float64=-3.0,
                      x_center_mm::Float64=0.0,
                      y_center_mm::Float64=0.0,
-                     wm=nothing)
+                     wm=nothing,
+                     bl=nothing)
     csv_path = joinpath(case_path, "postProcessing", filename)
     if !isfile(csv_path)
         @warn "midPlane.csv not found at $csv_path"
@@ -159,6 +160,37 @@ function plot_fields(case_path::AbstractString;
         end
     end
     colors = [:royalblue, :firebrick, :forestgreen, :darkorange, :purple, :teal]
+
+    # ── IBL boundary-layer overlay (active when valBL=true; bl !== nothing) ──
+    # Superimpose the integral-BL profile of the field named by `outname`
+    # ("uField"/"vField"/"wField") at DFP streamwise position `x_st` onto the
+    # given profile panel. `y_wall` shifts the BL wall-distance coordinate into
+    # the panel's absolute-y frame. No-op for fields without a BL counterpart.
+    bl_component = outname -> begin
+        bl === nothing && return nothing
+        outname == "uField" ? bl.u :
+        outname == "vField" ? bl.v :
+        outname == "wField" ? bl.w : nothing
+    end
+    # Color-matched (per-station) IBL profile; never labelled — a single black
+    # legend entry is added once, after all station curves, by bl_legend!.
+    overlay_bl! = (panel, outname, x_st, y_wall, color) -> begin
+        M = bl_component(outname)
+        M === nothing && return
+        cidx = argmin(abs.(bl.Xgrid .- x_st))
+        plot!(panel, M[:, cidx], bl.Y .+ y_wall;
+              label     = false,
+              color     = color,
+              linestyle = :dash,
+              linewidth = 2)
+    end
+    # Single black dashed "IBL" legend entry, placed after the station curves.
+    bl_legend! = (panel, outname) -> begin
+        bl_component(outname) === nothing && return
+        plot!(panel, [NaN], [NaN];
+              label = "IBL (dashed)", color = :black,
+              linestyle = :dash, linewidth = 2)
+    end
 
     common_prof = (
         framestyle     = :box,
@@ -390,7 +422,9 @@ function plot_fields(case_path::AbstractString;
                       label=station_label(st), color=c,
                       marker=:circle, markersize=3, markercolor=c,
                       markerstrokecolor=:black, markerstrokewidth=0.5)
+                overlay_bl!(p_pr, outname, st, minimum(yprof), c)
             end
+            bl_legend!(p_pr, outname)
 
             fig = plot(p_full, p_zoom, p_pr;
                 layout = @layout([grid(2,1){0.55w} b{0.45w}]),
@@ -493,7 +527,9 @@ function plot_fields(case_path::AbstractString;
                       label=station_label(si), color=c,
                       marker=:circle, markersize=3, markercolor=c,
                       markerstrokecolor=:black, markerstrokewidth=0.5)
+                overlay_bl!(p_pr, outname, xu[si], yu[1], c)
             end
+            bl_legend!(p_pr, outname)
 
             fig = plot(p_full, p_zoom, p_pr;
                 layout = @layout([grid(2,1){0.55w} b{0.45w}]),

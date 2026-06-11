@@ -202,6 +202,20 @@ const inp = (
         valPlot = true,   # true: overlay reference data on validation plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
         Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
+
+        # Boundary-layer (IBL) validation solver — src/thirdParty/IBL
+        # When true, the DirectFlatPlate :viz step runs the integral boundary-
+        # layer solver (solver_IBL.m, via MATLAB) and superimposes its u/v/w
+        # profiles on the DFP field plots. Solver inputs are derived from
+        # inp.DFP:
+        #   S  = xInlet,  L = xInlet + domainLength,  H = domainHeight,
+        #   nu = freeStreamViscosity,  We = Winf,
+        #   nx = streamwise cell count of the blockMesh,
+        #   Ue = analytic edge velocity Uinf·P(log x) from the DFP pressure
+        #        polynomial (same distribution the DFP top BC / coded inlet use).
+        valBL   = true,    # true to run IBL solver and overlay profiles
+        blNcheb = 150,     # IBL wall-normal Chebyshev node count
+        blYi    = 0.002,   # IBL Chebyshev node median [m] 
     ),
 
 )

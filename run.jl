@@ -40,6 +40,9 @@ include(joinpath(PV_DIR, "dfpvalidation.jl"))
 # External-to-scaling preprocessing
 include(joinpath(ROOT, "PreProcessing", "src", "source", "externalToScaling.jl"))
 
+# Third-party boundary-layer (IBL) solver bridge (glue to external/ solver)
+include(joinpath(ROOT, "PreProcessing", "src", "thirdParty", "bridge", "runIBL.jl"))
+
 # Module definitions and pipeline
 include(joinpath(ROOT, "PreProcessing", "src", "source", "pipeline.jl"))
 include(joinpath(ROOT, "PreProcessing", "src", "source", "tunnelToCurvedPlate.jl"))

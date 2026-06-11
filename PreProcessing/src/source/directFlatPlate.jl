@@ -213,14 +213,21 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
 
         :viz => () -> begin
             res    = plot_residuals(case_dir; savedir=plotting_dir, label="DirectFlatPlate")
+
+            # Boundary-layer (IBL) validation: run the solver and overlay its
+            # profiles on the field plots when inp.VAL.valBL is true.
+            bl = inp.VAL.valBL ?
+                run_ibl_solver(case_dir; savedir=plotting_dir) : nothing
+
             fields = plot_fields(case_dir; savedir=plotting_dir,
-                                 wm=merge(inp.wallModulation, inp.DFP.wallModulation))
+                                 wm=merge(inp.wallModulation, inp.DFP.wallModulation),
+                                 bl=bl)
             wval   = nothing
             if inp.VAL.valPlot
                 wval = plot_dfp_w_validation(case_dir; savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case)
             end
 
-            return (residuals=res, fields=fields, wval=wval)
+            return (residuals=res, fields=fields, wval=wval, bl=bl)
         end,
 
         :_order => () -> [:clean, :prep, :mesh, :run, :post, :viz],
