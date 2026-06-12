@@ -70,7 +70,7 @@ const inp = (
         ),
 
         # Output settings
-        outputFormat = "csv",           # csv | binary
+        outputFormat = "bin",           # csv | binary
         wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
@@ -198,24 +198,24 @@ const inp = (
             percentCrop  = 5.0,           # start cropping at this % of chord
             Nfit         = 4,             # polynomial order
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
+            valUe        = false,         # true: overlay the .mat reference Ue on
+                                          #       the airfoilLE BLQuantitiesCompare plot
         ),
-        valPlot = true,   # true: overlay reference data on validation plots
+        valPIV  = false,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
         Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
 
-        # Boundary-layer (IBL) validation solver — src/thirdParty/IBL
-        # When true, the DirectFlatPlate :viz step runs the integral boundary-
-        # layer solver (solver_IBL.m, via MATLAB) and superimposes its u/v/w
-        # profiles on the DFP field plots. Solver inputs are derived from
-        # inp.DFP:
-        #   S  = xInlet,  L = xInlet + domainLength,  H = domainHeight,
-        #   nu = freeStreamViscosity,  We = Winf,
-        #   nx = streamwise cell count of the blockMesh,
-        #   Ue = analytic edge velocity Uinf·P(log x) from the DFP pressure
-        #        polynomial (same distribution the DFP top BC / coded inlet use).
-        valBL   = true,    # true to run IBL solver and overlay profiles
-        blNcheb = 150,     # IBL wall-normal Chebyshev node count
-        blYi    = 0.002,   # IBL Chebyshev node median [m] 
+        # Spectral integral-boundary-layer (IBL) validation solver — shared by
+        # the DFP (profile overlay) and TTCP (δ99/δ* comparison). When valBL is
+        # true the relevant module runs solver_IBL_spectral (via MATLAB). The
+        # wall-normal grid is Chebyshev: blNcheb nodes over [0, H] with median
+        # node at blYi; blnx streamwise marching points. The domain height H is
+        # taken per case from its own geometry — DFP: domainHeight, TTCP:
+        # airfoilLE exportHeight (height of the exported data box).
+        valBL   = true,    # true to run the IBL solver (overlay/comparison)
+        blNcheb = 120,     # IBL wall-normal Chebyshev node count
+        blYi    = 0.002,   # IBL Chebyshev node median [m] (cluster in the BL)
+        blnx    = 1200,     # IBL streamwise marching points
     ),
 
 )

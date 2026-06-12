@@ -263,15 +263,24 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             wall = plot_wall_geometry(airfoil_case; savedir=plotting_dir, geom_args...)
             wallq = plot_wall_quantities(airfoil_case; savedir=plotting_dir, geom_args...)
             blq   = plot_bl_metrics(airfoil_case; savedir=plotting_dir)
-            blqc  = plot_bl_metrics_comparison(airfoil_case; savedir=plotting_dir)
+            # Direct Ue-vs-x/c comparison with the reference .mat (valUe)
+            ev = inp.VAL.externalToScaling
+            uexc = ev.valUe ?
+                plot_ue_xc(airfoil_case; savedir=plotting_dir,
+                           ref_mat=joinpath(root, "PreProcessing", "io",
+                                            "airfoilFlowData", ev.flowDataFile)) : nothing
+            # IBL validation: run the spectral solver inline (no trace) and plot
+            # δ99/δ* vs x/c against this CFD.
+            iblcmp = inp.VAL.valBL ?
+                plot_ttcp_ibl_comparison(airfoil_case; savedir=plotting_dir) : nothing
             expval = nothing
-            if inp.VAL.valPlot
+            if inp.VAL.valPIV
                 expval = plot_experimental_validation(airfoil_case;
                     savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case, delta=0.010, geom_args...)
             end
 
             return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq,
-                    blq=blq, blqc=blqc, expval=expval)
+                    blq=blq, uexc=uexc, iblcmp=iblcmp, expval=expval)
         end,
 
         :monitorTunnel => () -> begin

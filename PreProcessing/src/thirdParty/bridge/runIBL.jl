@@ -19,11 +19,6 @@ glob_app_dirs() = isdir("/Applications") ?
     [joinpath("/Applications", d) for d in readdir("/Applications")
      if startswith(d, "MATLAB") && endswith(d, ".app")] : String[]
 
-# blockMesh streamwise base cell counts per block (must match the nx_base in
-# backend.jl write_flat_plate_input_param). Total × gridXfactor is the
-# streamwise cell count of the DFP mesh.
-const _DFP_NX_BASE = (144, 24, 48, 24, 280, 96)   # sum = 616
-
 """
     _ue_poly(x, p) → Float64
 
@@ -44,12 +39,13 @@ function _ue_poly(x::Float64, p)
 end
 
 """
-    run_ibl_solver(case_path; savedir) → NamedTuple | nothing
+    run_ibl_solver() → NamedTuple | nothing
 
 Run the spectral integral boundary-layer solver (solver_IBL_spectral, via
-MATLAB) for the DirectFlatPlate case and return its velocity fields for overlay
-on the DFP plots. Returns `nothing` if the solver cannot be run (e.g. MATLAB
-unavailable) so that visualization can proceed without the overlay.
+MATLAB) for the DirectFlatPlate case and return its velocity fields (in memory)
+for overlay on the DFP plots. Returns `nothing` if the solver cannot be run
+(e.g. MATLAB unavailable) so that visualization can proceed without the overlay.
+Leaves no files behind (see `run_ibl`).
 
 The spectral solver seeds u, v AND w at the inlet from the Falkner-Skan-Cooke
 similarity solution, so the crossflow is imposed at x = 0 and matches the DFP
@@ -59,86 +55,109 @@ and does not).
 Solver inputs are derived from `inp.DFP` and `inp.VAL`:
   S  = xInlet,  L = xInlet + domainLength,  H = domainHeight,
   nu = freeStreamViscosity,  We = Winf,
-  nx  = blockMesh streamwise cell count (sum(_DFP_NX_BASE)·gridXfactor),
+  nx  = inp.VAL.blnx (streamwise marching points),
   ny  = inp.VAL.blNcheb (number of wall-normal Chebyshev nodes),
   y_i = inp.VAL.blYi (Chebyshev node median — half the nodes below it),
   Ue  = analytic edge velocity `Uinf·P(log x)` — the SAME distribution the DFP
         imposes (see `_ue_poly`), so the inlet FSC beta coincides with the DFP.
-
-`case_path` is retained for signature compatibility / future field checks; the
-solver inputs do not depend on parsing the DFP field output.
 
 Returned NamedTuple fields:
   Xgrid  streamwise coordinate in the DFP frame (0 -> domainLength)
   Y      wall-normal Chebyshev coordinate [m] (H -> 0)
   u,v,w  ny x nxout IBL velocity components (row 1 = freestream, row ny = wall)
 """
-function run_ibl_solver(case_path::AbstractString;
-                        savedir::AbstractString=case_path)
-    matlab = _find_matlab()
-    if matlab === nothing
-        @warn "MATLAB executable not found — skipping IBL overlay (set inp.VAL.valBL=false to silence)."
-        return nothing
-    end
-
+function run_ibl_solver()
     p = inp.DFP
-    S = p.xInlet
-    L = p.xInlet + p.domainLength
-    H = p.domainHeight
-    nu = p.freeStreamViscosity
-    We = p.Winf
 
-    # Streamwise resolution from the blockMesh. Wall-normal grid is the
-    # spectral solver's Chebyshev grid: blNcheb nodes mapped over [0, H] with
-    # median node at y_i = blYi (half the nodes below it — cluster in the BL).
-    nx  = sum(_DFP_NX_BASE) * Int(p.gridXfactor)
-    ny  = hasproperty(inp.VAL, :blNcheb) ? Int(inp.VAL.blNcheb) : 150
-    y_i = hasproperty(inp.VAL, :blYi)    ? Float64(inp.VAL.blYi) : 0.002
+    # Shared IBL grid (inp.VAL): blnx streamwise points, blNcheb Chebyshev
+    # wall-normal nodes over [0, H] with median at blYi. H is this case's domain
+    # height (DFP: domainHeight).
+    nx  = Int(inp.VAL.blnx)
+    ny  = Int(inp.VAL.blNcheb)
+    y_i = Float64(inp.VAL.blYi)
 
     # Edge velocity: the SAME analytic distribution the DFP imposes (log-
     # pressure polynomial), sampled on the uniform streamwise grid x_OF in
-    # [0, domainLength] → physical arc-length x = S .. L. Because Ue(x) (and its
-    # inlet gradient) matches the DFP, the solver derives the same FSC beta and
-    # the imposed inlet profile coincides with the DFP — no solver change.
+    # [0, domainLength] → physical arc-length x = xInlet .. xInlet+domainLength.
+    # The virtual origin S = xInlet is given directly (no calibration).
     xg = range(0.0, p.domainLength, length=nx)
-    Ue = [_ue_poly(S + xq, p) for xq in xg]
+    Ue = [_ue_poly(p.xInlet + xq, p) for xq in xg]
 
-    @info "IBL spectral grid & edge velocity" nx=nx ny_cheb=ny y_i=y_i H=H Ue_inlet=round(Ue[1], digits=4) Ue_outlet=round(Ue[end], digits=4)
+    @info "DFP IBL grid & edge velocity" nx=nx ny_cheb=ny y_i=y_i H=p.domainHeight Ue_inlet=round(Ue[1], digits=4) Ue_outlet=round(Ue[end], digits=4)
+
+    return run_ibl(; S=p.xInlet, Lspan=p.domainLength, H=p.domainHeight,
+                   nu=p.freeStreamViscosity, We=p.Winf, Ue=Ue,
+                   nx=nx, ny=ny, y_i=y_i)
+end
+
+"""
+    run_ibl(; S, Lspan, H, nu, We, Ue, nx, ny, y_i, calibrate_dstar=0.0)
+        → NamedTuple | nothing
+
+Low-level spectral-IBL run shared by the DFP and TTCP paths. The MATLAB
+input/output `.mat` files are written to a temporary directory and removed
+afterwards — the run leaves no trace; only the returned in-memory solution
+survives (or `nothing` on any failure). The virtual origin is `S` directly,
+unless `calibrate_dstar > 0`, in which case the driver picks `S` so the FSC
+inflow δ* equals that target. `Ue` is the length-`nx` edge velocity sampled over
+the physical span `Lspan`.
+"""
+function run_ibl(; S::Real, Lspan::Real, H::Real, nu::Real, We::Real,
+                 Ue::AbstractVector, nx::Integer, ny::Integer, y_i::Real,
+                 calibrate_dstar::Real=0.0)
+    matlab = _find_matlab()
+    if matlab === nothing
+        @warn "MATLAB executable not found — skipping IBL (set inp.VAL.valBL=false to silence)."
+        return nothing
+    end
+    length(Ue) == nx || error("run_ibl: Ue has $(length(Ue)) entries but nx=$nx")
 
     driver_dir = @__DIR__                          # PreProcessing/src/thirdParty/bridge
-    mkpath(savedir)
-    infile  = joinpath(savedir, "bl_input.mat")
-    outfile = joinpath(savedir, "bl_output.mat")
-    isfile(outfile) && rm(outfile; force=true)
-
-    matwrite(infile, Dict(
-        "nx"  => Float64(nx), "ny" => Float64(ny),
-        "S"   => Float64(S),  "L"  => Float64(L), "H" => Float64(H),
-        "y_i" => Float64(y_i),
-        "nu"  => Float64(nu), "We" => Float64(We),
-        "Ue"  => Vector{Float64}(Ue),
-    ))
-
-    cmd = Cmd(`$matlab -batch "run_IBL_DFP('$infile','$outfile')"`; dir=driver_dir)
-    @info "Invoking MATLAB IBL driver..." matlab=matlab
+    tmp = mktempdir()
     try
-        run(cmd)
-    catch e
-        @warn "MATLAB IBL driver failed — skipping overlay." exception=e
-        return nothing
-    end
+        infile  = joinpath(tmp, "ibl_in.mat")
+        outfile = joinpath(tmp, "ibl_out.mat")
+        matwrite(infile, Dict(
+            "nx"  => Float64(nx),     "ny"    => Float64(ny),
+            "S"   => Float64(S),      "Lspan" => Float64(Lspan), "H" => Float64(H),
+            "y_i" => Float64(y_i),
+            "nu"  => Float64(nu),     "We"    => Float64(We),
+            "Ue"  => Vector{Float64}(Ue),
+            "calibrate_dstar" => Float64(calibrate_dstar),
+        ))
 
-    if !isfile(outfile)
-        @warn "IBL driver produced no output ($outfile) — skipping overlay."
-        return nothing
+        cmd = Cmd(`$matlab -batch "ibl_driver('$infile','$outfile')"`; dir=driver_dir)
+        @info "Invoking MATLAB IBL driver..." matlab=matlab calibrate_dstar=calibrate_dstar
+        try
+            run(cmd)
+        catch e
+            @warn "MATLAB IBL driver failed — skipping." exception=e
+            return nothing
+        end
+        if !isfile(outfile)
+            @warn "IBL driver produced no output — skipping."
+            return nothing
+        end
+        bl = load_ibl_solution(outfile)
+        @info "IBL solution loaded" stations=length(bl.Xgrid) points=length(bl.Y)
+        return bl
+    finally
+        rm(tmp; recursive=true, force=true)
     end
+end
 
-    out = matread(outfile)
-    Xgrid = vec(Float64.(out["Xgrid"]))
-    Y     = vec(Float64.(out["Y"]))
-    u = Matrix{Float64}(out["u"])
-    v = Matrix{Float64}(out["v"])
-    w = Matrix{Float64}(out["w"])
-    @info "IBL solution loaded" stations=length(Xgrid) points=length(Y)
-    return (Xgrid=Xgrid, Y=Y, u=u, v=v, w=w)
+"""
+    load_ibl_solution(path) → NamedTuple | nothing
+
+Reconstruct the IBL solution `(Xgrid, Y, u, v, w)` from an `ibl_out.mat` written
+by the MATLAB driver. Internal helper for `run_ibl`; returns `nothing` if absent.
+"""
+function load_ibl_solution(path::AbstractString)
+    isfile(path) || return nothing
+    out = matread(path)
+    return (Xgrid = vec(Float64.(out["Xgrid"])),
+            Y     = vec(Float64.(out["Y"])),
+            u     = Matrix{Float64}(out["u"]),
+            v     = Matrix{Float64}(out["v"]),
+            w     = Matrix{Float64}(out["w"]))
 end

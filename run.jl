@@ -36,6 +36,7 @@ include(joinpath(PV_DIR, "wallquantities.jl"))
 include(joinpath(PV_DIR, "blmetrics.jl"))
 include(joinpath(PV_DIR, "experimentalvalidation.jl"))
 include(joinpath(PV_DIR, "dfpvalidation.jl"))
+include(joinpath(PV_DIR, "iblTTCPComparison.jl"))
 
 # External-to-scaling preprocessing
 include(joinpath(ROOT, "PreProcessing", "src", "source", "externalToScaling.jl"))

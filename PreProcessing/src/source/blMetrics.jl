@@ -130,10 +130,29 @@ end
 # CSV readers
 # ---------------------------------------------------------------------------
 
-"Read midPlane.csv. Returns (header::Vector{String}, data::Matrix{Float64})."
+"""
+    read_midplane(path) -> (header::Vector{String}, data::Matrix{Float64})
+
+Read the writeMidPlane output in either format. A `.csv` path is parsed as
+comma-separated with a header row; a `.bin` path is read as the binary layout
+written by the FO: `int32 nCols(=8)`, `int64 nRows`, then `nRows*nCols` little-
+endian `Float64` in row-major order (columns x,y,z,u,v,w,p,omz).
+"""
 function read_midplane(path::AbstractString)
-    data, hdr = readdlm(path, ',', Float64, '\n'; header=true)
-    return vec(String.(hdr)), data
+    if endswith(path, ".bin")
+        open(path, "r") do io
+            nCols = Int(read(io, Int32))
+            nRows = Int(read(io, Int64))
+            raw   = Vector{Float64}(undef, nCols * nRows)
+            read!(io, raw)
+            data  = permutedims(reshape(raw, nCols, nRows))   # row-major → (nRows, nCols)
+            hdr   = ["x", "y", "z", "u", "v", "w", "p", "omz"][1:nCols]
+            return hdr, data
+        end
+    else
+        data, hdr = readdlm(path, ',', Float64, '\n'; header=true)
+        return vec(String.(hdr)), data
+    end
 end
 
 "Read wallCoordinates.csv. Returns (x::Vector, y::Vector)."
@@ -424,12 +443,17 @@ end
 
 function main(case_dir::AbstractString)
     inputParam = joinpath(case_dir, "constant", "inputParam")
-    midPlane   = joinpath(case_dir, "postProcessing", "midPlane.csv")
-    wallCoords = joinpath(case_dir, "postProcessing", "wallCoordinates.csv")
+    ppDir      = joinpath(case_dir, "postProcessing")
+    # writeMidPlane writes midPlane.csv or midPlane.bin per outputFormat; accept
+    # either (CSV preferred when both exist).
+    midPlaneCsv = joinpath(ppDir, "midPlane.csv")
+    midPlaneBin = joinpath(ppDir, "midPlane.bin")
+    midPlane    = isfile(midPlaneCsv) ? midPlaneCsv : midPlaneBin
+    wallCoords = joinpath(ppDir, "wallCoordinates.csv")
 
     @printf "blMetrics: case = %s\n" abspath(case_dir)
     isfile(inputParam) || error("missing $(inputParam)")
-    isfile(midPlane)   || error("missing $(midPlane) — run runPostProcess first")
+    isfile(midPlane)   || error("missing midPlane.csv/.bin in $(ppDir) — run runPostProcess first")
     isfile(wallCoords) || error("missing $(wallCoords) — partial mode not active?")
 
     up = read_subdict(inputParam, "Upinlet")
@@ -531,25 +555,6 @@ function main(case_dir::AbstractString)
         end
     end
 
-    # Comparison output (all five methods) — same row order
-    cmpFile = joinpath(case_dir, "postProcessing", "BLQuantities_compare.csv")
-    open(cmpFile, "w") do io
-        println(io, "x,s," *
-            "Ue_vorticityTrap,Ue_vorticityMid,Ue_max,Ue_fix,Ue_bern," *
-            "d99_vorticityTrap,d99_vorticityMid,d99_max,d99_fix,d99_bern," *
-            "dstar_vorticityTrap,dstar_vorticityMid,dstar_max,dstar_fix,dstar_bern," *
-            "Theta_vorticityTrap,Theta_vorticityMid,Theta_max,Theta_fix,Theta_bern")
-        for k in 1:nW
-            j = perm[k]
-            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
-                xw[j], ss[j],
-                Ue_vT[j],   Ue_vM[j],   Ue_m[j],   Ue_f[j],   Ue_b[j],
-                d99_vT[j],  d99_vM[j],  d99_m[j],  d99_f[j],  d99_b[j],
-                dst_vT[j],  dst_vM[j],  dst_m[j],  dst_f[j],  dst_b[j],
-                th_vT[j],   th_vM[j],   th_m[j],   th_f[j],   th_b[j])
-        end
-    end
-
     # Summary — table across all five methods, the configured one is starred
     nW_valid(v) = count(isfinite, v)
     star(m) = (m == method ? " *" : "")
@@ -570,7 +575,6 @@ function main(case_dir::AbstractString)
         end
     end
     @printf "  → %s\n" outFile
-    @printf "  → %s\n" cmpFile
 
     return nothing
 end
