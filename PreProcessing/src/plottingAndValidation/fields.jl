@@ -106,30 +106,27 @@ function plot_fields(case_path::AbstractString;
                      y_center_mm::Float64=0.0,
                      wm=nothing,
                      bl=nothing)
-    csv_path = joinpath(case_path, "postProcessing", filename)
-    if !isfile(csv_path)
-        @warn "midPlane.csv not found at $csv_path"
+    # Accept either midPlane.csv or the binary midPlane.bin — read_midplane
+    # (from blMetrics.jl) handles both; columns are x,y,z,u,v,w,p,omz.
+    ppdir = joinpath(case_path, "postProcessing")
+    base  = replace(filename, r"\.(csv|bin)$" => "")
+    mid   = isfile(joinpath(ppdir, "$base.csv")) ? joinpath(ppdir, "$base.csv") :
+            isfile(joinpath(ppdir, "$base.bin")) ? joinpath(ppdir, "$base.bin") : nothing
+    if mid === nothing
+        @warn "midPlane.csv/.bin not found in $ppdir"
         return nothing
     end
 
-    @info "Parsing fields from $csv_path"
+    @info "Parsing fields from $mid"
 
-    lines = readlines(csv_path)
-    x_all = Float64[]; y_all = Float64[]; z_all = Float64[]
-    u_all = Float64[]; v_all = Float64[]; w_all = Float64[]; p_all = Float64[]
-    for line in lines[2:end]
-        fields = split(line, ',')
-        length(fields) >= 7 || continue
-        vals = tryparse.(Float64, fields[1:7])
-        any(isnothing, vals) && continue
-        push!(x_all, vals[1]); push!(y_all, vals[2]); push!(z_all, vals[3])
-        push!(u_all, vals[4]); push!(v_all, vals[5]); push!(w_all, vals[6])
-        push!(p_all, vals[7])
-    end
-    if isempty(x_all)
-        @warn "No valid data rows in $csv_path"
+    _, raw = read_midplane(mid)
+    if isempty(raw)
+        @warn "No valid data rows in $mid"
         return nothing
     end
+    x_all = Float64.(raw[:, 1]); y_all = Float64.(raw[:, 2]); z_all = Float64.(raw[:, 3])
+    u_all = Float64.(raw[:, 4]); v_all = Float64.(raw[:, 5]); w_all = Float64.(raw[:, 6])
+    p_all = Float64.(raw[:, 7])
 
     # Filter to one z-layer (avoids NaN gaps from cyclic z-boundaries)
     z_unique = sort(unique(round.(z_all, digits=6)))
@@ -172,8 +169,10 @@ function plot_fields(case_path::AbstractString;
         outname == "vField" ? bl.v :
         outname == "wField" ? bl.w : nothing
     end
-    # Color-matched (per-station) IBL profile; never labelled — a single black
-    # legend entry is added once, after all station curves, by bl_legend!.
+    # Color-matched (per-station) IBL profile — solid, thin; never labelled. A
+    # single black legend entry is added once, after all station curves, by
+    # bl_legend!. (DFP profiles are black lines + coloured markers, so the
+    # solid coloured IBL line stays distinguishable.)
     overlay_bl! = (panel, outname, x_st, y_wall, color) -> begin
         M = bl_component(outname)
         M === nothing && return
@@ -181,15 +180,13 @@ function plot_fields(case_path::AbstractString;
         plot!(panel, M[:, cidx], bl.Y .+ y_wall;
               label     = false,
               color     = color,
-              linestyle = :dash,
-              linewidth = 2)
+              linewidth = 1.2)
     end
-    # Single black dashed "IBL" legend entry, placed after the station curves.
+    # Single black "IBL" legend entry, placed after the station curves.
     bl_legend! = (panel, outname) -> begin
         bl_component(outname) === nothing && return
         plot!(panel, [NaN], [NaN];
-              label = "IBL (dashed)", color = :black,
-              linestyle = :dash, linewidth = 2)
+              label = "IBL", color = :black, linewidth = 1.2)
     end
 
     common_prof = (
@@ -336,7 +333,6 @@ function plot_fields(case_path::AbstractString;
             cb_title = latexstring(comp_label, raw" \ \mathrm{[m/s]}")
             xg, yg, Fg = scatter_to_grid(x, y, fv; nx=700, ny=400, fill_iters=10)
             y_lo, y_hi = yg[1], yg[end]
-            y_zoom_hi = y_lo + (y_hi - y_lo) / 8
 
             make_panel = (ylims_p; force_auto_ar=false, show_cb_title=true) -> begin
                 panel = heatmap(xg, yg, Fg;
@@ -351,7 +347,6 @@ function plot_fields(case_path::AbstractString;
             end
 
             p_full = make_panel((y_lo, y_hi))
-            p_zoom = make_panel((y_lo, y_zoom_hi); force_auto_ar=true, show_cb_title=false)
 
             p_pr = plot(; xlabel=comp_latex, ylabel=prof_ylabel,
                 ylims=prof_ylims, legend=:outerright, common_prof...)
@@ -365,8 +360,8 @@ function plot_fields(case_path::AbstractString;
                       markerstrokecolor=:black, markerstrokewidth=0.5)
             end
 
-            fig = plot(p_full, p_zoom, p_pr;
-                layout = @layout([grid(2,1){0.55w} b{0.45w}]),
+            fig = plot(p_full, p_pr;
+                layout = @layout([a{0.55w} b{0.45w}]),
                 size = (1300, 450))
             outfile = joinpath(savedir, "$(outname)$(label).png")
             savefig(fig, outfile); @info "Saved: $outfile"
@@ -419,7 +414,7 @@ function plot_fields(case_path::AbstractString;
                 isempty(fprof) && continue
                 c = colors[mod1(k, length(colors))]
                 plot!(p_pr, fprof, yprof;
-                      label=station_label(st), color=c,
+                      label=station_label(st), linecolor=:black,
                       marker=:circle, markersize=3, markercolor=c,
                       markerstrokecolor=:black, markerstrokewidth=0.5)
                 overlay_bl!(p_pr, outname, st, minimum(yprof), c)
@@ -524,7 +519,7 @@ function plot_fields(case_path::AbstractString;
                 profile = fv_mat[:, si]
                 c = colors[mod1(k, length(colors))]
                 plot!(p_pr, profile, yu;
-                      label=station_label(si), color=c,
+                      label=station_label(si), linecolor=:black,
                       marker=:circle, markersize=3, markercolor=c,
                       markerstrokecolor=:black, markerstrokewidth=0.5)
                 overlay_bl!(p_pr, outname, xu[si], yu[1], c)

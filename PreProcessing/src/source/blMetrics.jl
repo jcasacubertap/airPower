@@ -441,7 +441,19 @@ end
 # Main (Pass 4: + per-face integrals → blMetrics.csv)
 # ---------------------------------------------------------------------------
 
-function main(case_dir::AbstractString)
+"""
+    compute_bl_all_methods(case_dir) -> NamedTuple
+
+Read the post-processed mid-plane + wall data for `case_dir` and compute the
+boundary-layer metrics (U_e, δ99, δ*, θ) for ALL five freestream methods at
+every suction-side wall face. Returns the per-face arrays (suffixes: `_vT`
+vorticityIntegralTrapezoidal, `_vM` vorticityIntegralMidpoint, `_m` maxProfile,
+`_f` fixedHeight, `_b` pressureBernoulli) plus the wall parameterisation
+(`xw`, `ss`, `xis`, `perm`, `nW`) and the configured `method`. Writes nothing —
+both `main` (CSV + summary) and `plot_bl_metrics_comparison` (figure) build on
+this without any intermediate file on disk.
+"""
+function compute_bl_all_methods(case_dir::AbstractString)
     inputParam = joinpath(case_dir, "constant", "inputParam")
     ppDir      = joinpath(case_dir, "postProcessing")
     # writeMidPlane writes midPlane.csv or midPlane.bin per outputFormat; accept
@@ -536,6 +548,29 @@ function main(case_dir::AbstractString)
         d99_f[j],  dst_f[j],  th_f[j]  = compute_bl_integrals(n_int, u_int, Ue_f[j];  max_n=expHeightM)
         d99_b[j],  dst_b[j],  th_b[j]  = compute_bl_integrals(n_int, u_int, Ue_b[j];  max_n=expHeightM)
     end
+
+    return (; nW, xw, ss, xis, perm, method,
+            Ue_vT, Ue_vM, Ue_m, Ue_f, Ue_b,
+            d99_vT, d99_vM, d99_m, d99_f, d99_b,
+            dst_vT, dst_vM, dst_m, dst_f, dst_b,
+            th_vT, th_vM, th_m, th_f, th_b)
+end
+
+"""
+    main(case_dir)
+
+Production post-processor: compute BL metrics for all methods (via
+`compute_bl_all_methods`), write `BLQuantities.csv` for the configured method,
+and print the cross-method summary table.
+"""
+function main(case_dir::AbstractString)
+    r = compute_bl_all_methods(case_dir)
+    method                              = r.method
+    nW, xw, ss, xis, perm               = r.nW, r.xw, r.ss, r.xis, r.perm
+    Ue_vT, Ue_vM, Ue_m, Ue_f, Ue_b      = r.Ue_vT, r.Ue_vM, r.Ue_m, r.Ue_f, r.Ue_b
+    d99_vT, d99_vM, d99_m, d99_f, d99_b = r.d99_vT, r.d99_vM, r.d99_m, r.d99_f, r.d99_b
+    dst_vT, dst_vM, dst_m, dst_f, dst_b = r.dst_vT, r.dst_vM, r.dst_m, r.dst_f, r.dst_b
+    th_vT, th_vM, th_m, th_f, th_b      = r.th_vT, r.th_vM, r.th_m, r.th_f, r.th_b
 
     # Production output (configured method) — sorted by xi
     sel = method == "vorticityIntegralTrapezoidal" ? (Ue_vT, d99_vT, dst_vT, th_vT) :

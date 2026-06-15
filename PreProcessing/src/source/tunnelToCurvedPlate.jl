@@ -263,12 +263,16 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
             wall = plot_wall_geometry(airfoil_case; savedir=plotting_dir, geom_args...)
             wallq = plot_wall_quantities(airfoil_case; savedir=plotting_dir, geom_args...)
             blq   = plot_bl_metrics(airfoil_case; savedir=plotting_dir)
-            # Direct Ue-vs-x/c comparison with the reference .mat (valUe)
+            # Inter-method comparison of the 5 freestream Ue methods (vs arclength
+            # S; computed in-memory, no CSV).
+            blqc  = plot_bl_metrics_comparison(airfoil_case; savedir=plotting_dir)
+            # When valUe is on, a direct U_e-vs-x/c plot overlaying the 5 methods
+            # and the external reference .mat (no arclength mapping).
             ev = inp.VAL.externalToScaling
             uexc = ev.valUe ?
-                plot_ue_xc(airfoil_case; savedir=plotting_dir,
-                           ref_mat=joinpath(root, "PreProcessing", "io",
-                                            "airfoilFlowData", ev.flowDataFile)) : nothing
+                plot_ue_methods_xc(airfoil_case; savedir=plotting_dir,
+                                   ref_mat=joinpath(root, "PreProcessing", "io",
+                                                    "airfoilFlowData", ev.flowDataFile)) : nothing
             # IBL validation: run the spectral solver inline (no trace) and plot
             # δ99/δ* vs x/c against this CFD.
             iblcmp = inp.VAL.valBL ?
@@ -279,8 +283,9 @@ function make_tunnel_to_curved_plate(backend::BackendType, root::AbstractString)
                     savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case, delta=0.010, geom_args...)
             end
 
-            return (res_airfoil=res_airfoil, fields=fields, wall=wall, wallq=wallq,
-                    blq=blq, uexc=uexc, iblcmp=iblcmp, expval=expval)
+            return (res_airfoil=res_airfoil, fields=fields,
+                    wall=wall, wallq=wallq, blq=blq, blqc=blqc, uexc=uexc,
+                    iblcmp=iblcmp, expval=expval)
         end,
 
         :monitorTunnel => () -> begin

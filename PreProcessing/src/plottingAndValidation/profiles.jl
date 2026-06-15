@@ -118,14 +118,19 @@ function plot_profiles(case_path::AbstractString;
                        alpha_deg::Float64=-3.0,
                        x_center_mm::Float64=0.0,
                        y_center_mm::Float64=0.0)
-    csv_path = joinpath(case_path, "postProcessing", filename)
-    if !isfile(csv_path)
-        @warn "midPlane.csv not found at $csv_path"
+    # Accept either midPlane.csv or the binary midPlane.bin — read_midplane
+    # (from blMetrics.jl) handles both; columns are x,y,z,u,v,w,p,omz.
+    ppdir = joinpath(case_path, "postProcessing")
+    base  = replace(filename, r"\.(csv|bin)$" => "")
+    mid   = isfile(joinpath(ppdir, "$base.csv")) ? joinpath(ppdir, "$base.csv") :
+            isfile(joinpath(ppdir, "$base.bin")) ? joinpath(ppdir, "$base.bin") : nothing
+    if mid === nothing
+        @warn "midPlane.csv/.bin not found in $ppdir"
         return nothing
     end
 
-    @info "Parsing BL profiles from $csv_path"
-    raw = readdlm(csv_path, ','; skipstart=1)
+    @info "Parsing BL profiles from $mid"
+    _, raw = read_midplane(mid)
     x_all = Float64.(raw[:, 1])
     y_all = Float64.(raw[:, 2])
     u_all = Float64.(raw[:, 4])
