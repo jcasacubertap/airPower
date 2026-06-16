@@ -44,25 +44,21 @@ function plot_experimental_validation(case_path::AbstractString;
     @info "Experimental stations (x/c): $stations"
 
     # ── Read OpenFOAM field data ──
-    csv_path = joinpath(case_path, "postProcessing", "midPlane.csv")
-    if !isfile(csv_path)
-        @warn "midPlane.csv not found at $csv_path"
+    # Accept either midPlane.csv or the binary midPlane.bin — read_midplane
+    # (from blMetrics.jl) handles both; columns are x,y,z,u,v,w,p,omz.
+    ppdir = joinpath(case_path, "postProcessing")
+    mid   = isfile(joinpath(ppdir, "midPlane.csv")) ? joinpath(ppdir, "midPlane.csv") :
+            isfile(joinpath(ppdir, "midPlane.bin")) ? joinpath(ppdir, "midPlane.bin") : nothing
+    if mid === nothing
+        @warn "midPlane.csv/.bin not found in $ppdir"
         return nothing
     end
-
-    lines = readlines(csv_path)
-    x_of = Float64[]; y_of = Float64[]; w_of = Float64[]
-    for line in lines[2:end]
-        fields = split(line, ',')
-        length(fields) >= 7 || continue
-        vals = tryparse.(Float64, fields)
-        any(isnothing, vals) && continue
-        push!(x_of, vals[1]); push!(y_of, vals[2]); push!(w_of, vals[6])
-    end
-    if isempty(x_of)
-        @warn "No valid data in $csv_path"
+    _, raw = read_midplane(mid)
+    if isempty(raw)
+        @warn "No valid data in $mid"
         return nothing
     end
+    x_of = Float64.(raw[:, 1]); y_of = Float64.(raw[:, 2]); w_of = Float64.(raw[:, 6])
 
     mkpath(savedir)
 

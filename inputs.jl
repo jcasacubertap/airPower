@@ -32,23 +32,23 @@ const inp = (
     # ======================================================================
     DFP = (
         # Domain geometry 
-        domainLength = 0.398763, # [m]
+        domainLength = 0.650,    # [m]
         domainHeight = 0.020046, # [m]
 
         # Inflow parameters
-        Uinf   = 15.10,                 # chordwise velocity [m/s]
-        Winf   = 18.7379374199,         # spanwise velocity [m/s]
-        xInlet = 0.04684993006,         # inlet position (distance from virtual LE) [m]
+        Uinf   = 12.417927662146404,    # chordwise velocity [m/s]
+        Winf   = 20.59,                 # spanwise velocity [m/s]
+        xInlet = 0.046694057793992,     # inlet position (distance from virtual LE) [m]
 
         # Top-boundary pressure polynomial (Casacuberta et al, 2022)
-        pa4 = 0.002343802682877,
-        pa3 = 0.037696164789990,
-        pa2 = 0.175152760791389,
-        pa1 = 0.530290605857447,
-        pa0 = 1.857425373851459,
+        pa4 = 0.004709401639645,
+        pa3 = 0.059408065736933,
+        pa2 = 0.245222700832888,
+        pa1 = 0.657504955493668,
+        pa0 = 2.006271563747756,
 
         # Fluid properties
-        freeStreamViscosity = 1.472e-5,   # [m^2/s]
+        freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
         gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
@@ -82,7 +82,7 @@ const inp = (
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
             freeStreamVelocityStreamwise  = 17.570475447234216,  # [m/s]
-            freeStreamVelocitySpanwise    = 20.59,              # [m/s]
+            freeStreamVelocitySpanwise    = 20.59,               # [m/s]
             freeStreamViscosity = 1.456610719354608e-5,         # [m^2/s]
         ),
 
@@ -170,7 +170,7 @@ const inp = (
             # Suppress mapped-pressure noise in the BL on suction/pressure outlets:
             # within `factor` × Blasius δ from the wall, the prescribed p is set
             # constant equal to the value at the first face beyond that band.
-            clampOutletPressureBL       = true,
+            clampOutletPressureBL       = false,
             clampOutletPressureBLFactor = 2.0,
 
             # Wall modulation position on the airfoil upper surface (chord fraction).
@@ -198,10 +198,10 @@ const inp = (
             percentCrop  = 5.0,           # start cropping at this % of chord
             Nfit         = 4,             # polynomial order
             fitLaw       = :logarithmic,  # :monomial or :logarithmic
-            valUe        = false,         # true: overlay the .mat reference Ue on
+            valUe        = true,         # true: overlay the .mat reference Ue on
                                           #       the airfoilLE BLQuantitiesCompare plot
         ),
-        valPIV  = false,  # true: overlay experimental PIV reference data on plots
+        valPIV  = true,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
         Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
 

@@ -6,6 +6,14 @@ const METHOD_COLORS = (vortT=:royalblue, vortM=:darkorange, max=:firebrick,
 const METHOD_LABELS = (vortT="vorticityIntegralTrapezoidal", vortM="vorticityIntegralMidpoint",
                        max="maxProfile", fix="fixedHeight", bern="pressureBernoulli")
 
+# Caveat shown on the U_e comparison figures: pressureBernoulli returns the
+# in-plane SPEED √(u²+v²) (total-head recovery), whereas the other four return
+# the tangential COMPONENT u_t = u·t̂. They differ by the wall-normal velocity,
+# most noticeably near the high-curvature leading edge. (Two short lines — GR
+# mathtext has no \text, so wording avoids hyphenated words in math mode.)
+const UE_DEF_NOTE1 = L"\mathrm{pressureBernoulli:}\ U_e=\sqrt{u^2+v^2}\ \ (\mathrm{in\ plane\ speed})"
+const UE_DEF_NOTE2 = L"\mathrm{other\ methods:}\ U_e=u_t\ \ (\mathrm{tangential\ component})"
+
 """
     plot_bl_metrics(case_path; savedir)
 
@@ -161,6 +169,12 @@ function plot_bl_metrics_comparison(case_path::AbstractString;
     end
 
     p1 = fivepanel(Ue;    ylabel=L"U_e\ \mathrm{[m/s]}",     title="Edge velocity")
+    # U_e-definition caveat. Bottom-right is the empty region here (the legend
+    # occupies the top-left, and U_e rises with S so the lower-right is clear).
+    xR  = maximum(S) - 0.01*(maximum(S) - minimum(S))
+    yh  = maximum(filter(isfinite, Ue.vortM)); yl = minimum(filter(isfinite, Ue.bern))
+    annotate!(p1, xR, yl + 0.12*(yh - yl), text(UE_DEF_NOTE1, 7, :gray35, :right, :bottom))
+    annotate!(p1, xR, yl + 0.05*(yh - yl), text(UE_DEF_NOTE2, 7, :gray35, :right, :bottom))
     p2 = fivepanel(d99;   yscale=1e3, ylabel=L"\delta_{99}\ \mathrm{[mm]}", title=L"\delta_{99}")
     p3 = fivepanel(dst;   yscale=1e3, ylabel=L"\delta^*\ \mathrm{[mm]}",    title=L"\delta^*")
     p4 = fivepanel(Theta; yscale=1e3, ylabel=L"\theta\ \mathrm{[mm]}",      title=L"\theta")
@@ -226,6 +240,16 @@ function plot_ue_methods_xc(case_path::AbstractString;
                   linewidth=2, marker=:circle, markersize=3, markerstrokewidth=0)
         end
     end
+
+    # Flag the U_e definition difference (Bernoulli = in-plane speed; others =
+    # tangential). Two lines anchored top-left, where U_e(x/c) is lowest → no
+    # data overlap.
+    x0  = minimum(xi) + 0.01*(maximum(xi) - minimum(xi))
+    yhi = maximum(filter(isfinite, r.Ue_vM[ord]))
+    ylo = minimum(filter(isfinite, r.Ue_b[ord]))
+    dy  = yhi - ylo
+    annotate!(p, x0, yhi,             text(UE_DEF_NOTE1, 7, :gray35, :left, :top))
+    annotate!(p, x0, yhi - 0.06*dy,   text(UE_DEF_NOTE2, 7, :gray35, :left, :top))
 
     outfile = joinpath(savedir, "UeMethodsXC$(basename(case_path)).png")
     savefig(p, outfile)
