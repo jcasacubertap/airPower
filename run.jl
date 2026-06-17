@@ -41,6 +41,11 @@ include(joinpath(PV_DIR, "iblTTCPComparison.jl"))
 # External-to-scaling preprocessing
 include(joinpath(ROOT, "PreProcessing", "src", "source", "externalToScaling.jl"))
 
+# BL-metrics computation (also run standalone in postAirfoil); included so the
+# viz step can build the freestream-method comparison figure in-memory, with no
+# intermediate BLQuantities_compare.csv written to disk.
+include(joinpath(ROOT, "PreProcessing", "src", "source", "blMetrics.jl"))
+
 # Third-party boundary-layer (IBL) solver bridge (glue to external/ solver)
 include(joinpath(ROOT, "PreProcessing", "src", "thirdParty", "bridge", "runIBL.jl"))
 

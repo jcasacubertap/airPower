@@ -13,6 +13,12 @@ const METHOD_LABELS = (vortT="vorticityIntegralTrapezoidal", vortM="vorticityInt
 # mathtext has no \text, so wording avoids hyphenated words in math mode.)
 const UE_DEF_NOTE1 = L"\mathrm{pressureBernoulli:}\ U_e=\sqrt{u^2+v^2}\ \ (\mathrm{in\ plane\ speed})"
 const UE_DEF_NOTE2 = L"\mathrm{other\ methods:}\ U_e=u_t\ \ (\mathrm{tangential\ component})"
+# Near the leading edge the wall-normal velocity u_n is appreciable (streamline
+# curvature/displacement), so the thin-BL assumptions degrade and the tangential
+# and in-plane definitions diverge — every U_e estimate is least reliable there.
+const UE_DEF_NOTE3 = L"\mathrm{shaded\ LE:}\ u_n\ \mathrm{appreciable}\Rightarrow U_e\ \mathrm{least\ reliable}"
+# Chord fraction below which the LE band is shaded on the U_e figures.
+const LE_XC = 0.06
 
 """
     plot_bl_metrics(case_path; savedir)
@@ -173,8 +179,13 @@ function plot_bl_metrics_comparison(case_path::AbstractString;
     # occupies the top-left, and U_e rises with S so the lower-right is clear).
     xR  = maximum(S) - 0.01*(maximum(S) - minimum(S))
     yh  = maximum(filter(isfinite, Ue.vortM)); yl = minimum(filter(isfinite, Ue.bern))
-    annotate!(p1, xR, yl + 0.12*(yh - yl), text(UE_DEF_NOTE1, 7, :gray35, :right, :bottom))
-    annotate!(p1, xR, yl + 0.05*(yh - yl), text(UE_DEF_NOTE2, 7, :gray35, :right, :bottom))
+    annotate!(p1, xR, yl + 0.19*(yh - yl), text(UE_DEF_NOTE1, 7, :gray35, :right, :bottom))
+    annotate!(p1, xR, yl + 0.12*(yh - yl), text(UE_DEF_NOTE2, 7, :gray35, :right, :bottom))
+    annotate!(p1, xR, yl + 0.05*(yh - yl), text(UE_DEF_NOTE3, 7, :gray35, :right, :bottom))
+    # Shade the leading-edge region (xi < LE_XC) on the arclength axis.
+    let ile = findfirst(>(LE_XC), r.xis[ord])
+        ile !== nothing && vspan!(p1, [minimum(S), S[ile]]; color=:gray, alpha=0.12, label=false)
+    end
     p2 = fivepanel(d99;   yscale=1e3, ylabel=L"\delta_{99}\ \mathrm{[mm]}", title=L"\delta_{99}")
     p3 = fivepanel(dst;   yscale=1e3, ylabel=L"\delta^*\ \mathrm{[mm]}",    title=L"\delta^*")
     p4 = fivepanel(Theta; yscale=1e3, ylabel=L"\theta\ \mathrm{[mm]}",      title=L"\theta")
@@ -250,6 +261,10 @@ function plot_ue_methods_xc(case_path::AbstractString;
     dy  = yhi - ylo
     annotate!(p, x0, yhi,             text(UE_DEF_NOTE1, 7, :gray35, :left, :top))
     annotate!(p, x0, yhi - 0.06*dy,   text(UE_DEF_NOTE2, 7, :gray35, :left, :top))
+    annotate!(p, x0, yhi - 0.12*dy,   text(UE_DEF_NOTE3, 7, :gray35, :left, :top))
+    # Shade the leading-edge region (u_n appreciable → estimates least reliable).
+    minimum(xi) < LE_XC &&
+        vspan!(p, [minimum(xi), LE_XC]; color=:gray, alpha=0.12, label=false)
 
     outfile = joinpath(savedir, "UeMethodsXC$(basename(case_path)).png")
     savefig(p, outfile)
