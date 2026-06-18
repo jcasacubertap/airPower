@@ -8,7 +8,7 @@ inp.airPowerRoot = fileparts(fileparts(mfilename('fullpath')));
 %   'loadFields' -> base flow + perturbation together, from io/fields/<inp.fieldsFile>.
 %                   Here the base flow has been interpolated onto the stability
 %                   grid, so it differs from the midPlane base flow.
-inp.loadMode = 'loadFields';
+inp.loadMode = 'loadBF';
 
 % Which module's "post" outputs to import (loadBF only):
 %   'DFP'  -> PreProcessing/Modules/DirectFlatPlateModule
@@ -21,5 +21,5 @@ inp.fieldsFile = 'Casacuberta2022.mat';
 % Validation: when true, plot the perturbation-amplitude comparison
 % (max over y of |u'| vs x) for the loaded sPert. The reference curves
 % from src/validation/<inp.validationFile> will be overlaid later.
-inp.validation     = true;
+inp.validation     = false;
 inp.validationFile = 'dataExtCrossA.mat';

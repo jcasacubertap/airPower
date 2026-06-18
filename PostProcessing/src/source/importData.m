@@ -15,7 +15,8 @@ function [sBF, sPert, inp] = importData(inp)
 %   sBF.u, sBF.v, sBF.w    velocity components
 %   sBF.p                  pressure          (loadBF; absent in loadFields)
 %   sBF.omz                z-vorticity       (loadBF, if present in source)
-%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients (loadFields only)
+%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients (loadFields: read from source;
+%                          loadBF: computed here from u,v,w via differentiateField)
 %
 % sPert (loadFields only) carries all perturbation modes:
 %   sPert.u,v,w,p          (Nmode x Ny x Nx) complex amplitude functions
@@ -42,6 +43,71 @@ function [sBF, sPert, inp] = importData(inp)
                   'Unknown loadMode: ''%s''. Must be ''loadBF'' or ''loadFields''.', ...
                   inp.loadMode);
     end
+
+    % Enforce the post-processing row convention on every assembled matrix:
+    %   row 1   (1,:)   = free-stream
+    %   row end (end,:) = wall
+    % Applied here, at the single load entry point, so all downstream consumers
+    % and any matrix assembly (e.g. reynoldsOrrProdTermsFun) can rely on it. The
+    % base-flow gradients (ux..wy) are Ny x Nx too, so they flip together with
+    % the velocity fields and stay co-registered.
+    [sBF, sPert] = orientFreestreamToWall(sBF, sPert);
+end
+
+% --- enforce row convention: (1,:) free-stream, (end,:) wall ---
+% The wall-normal orientation is decided physically: the free-stream carries the
+% largest velocity magnitude and the wall the smallest (no-slip). This is
+% independent of how each source happened to store the wall-normal coordinate
+% (loadBF sorts y ascending; loadFields takes the .mat's order as-is), so both
+% paths end up consistent. The same flip is applied to the base flow and to
+% every perturbation mode so they remain co-registered on the grid.
+function [sBF, sPert] = orientFreestreamToWall(sBF, sPert)
+
+    if ~isfield(sBF, 'u') || isempty(sBF.u)
+        return;   % no velocity to decide on; leave as-is
+    end
+    [Ny, Nx] = size(sBF.u);
+
+    % per-row mean speed (averaged over x), from whatever components exist
+    spd2 = zeros(Ny, Nx);
+    for c = {'u', 'v', 'w'}
+        if isfield(sBF, c{1}) && isequal(size(sBF.(c{1})), [Ny, Nx])
+            spd2 = spd2 + sBF.(c{1}).^2;
+        end
+    end
+    rowSpeed = mean(sqrt(spd2), 2, 'omitnan');   % Ny x 1
+
+    % Need both extremes to decide; bail (no flip) if either is undefined.
+    if isnan(rowSpeed(1)) || isnan(rowSpeed(end))
+        warning('importData:cannotOrient', ...
+                ['Could not determine free-stream/wall orientation (NaN in the ', ...
+                 'edge rows). Leaving row order unchanged — verify (1,:) is the ', ...
+                 'free-stream and (end,:) the wall.']);
+        return;
+    end
+
+    if rowSpeed(1) >= rowSpeed(end)
+        fprintf('importData: rows already free-stream (1,:) -> wall (end,:)\n');
+        return;
+    end
+
+    % row 1 is the low-speed (wall) side -> flip the wall-normal order
+    flds = fieldnames(sBF);
+    for i = 1:numel(flds)
+        if isequal(size(sBF.(flds{i})), [Ny, Nx])
+            sBF.(flds{i}) = flipud(sBF.(flds{i}));
+        end
+    end
+    if ~isempty(sPert)
+        pf = fieldnames(sPert);
+        for i = 1:numel(pf)
+            v = sPert.(pf{i});
+            if ndims(v) == 3 && size(v, 2) == Ny     % (Nmode x Ny x Nx) modes
+                sPert.(pf{i}) = flip(v, 2);
+            end
+        end
+    end
+    fprintf('importData: flipped wall-normal rows -> free-stream (1,:), wall (end,:)\n');
 end
 
 % --- loadBF: read a PreProcessing case's midPlane and arrange it on a meshgrid ---
@@ -126,6 +192,26 @@ function [sBF, inp] = importFromPreProc(inp)
         M = nan(Ny, Nx);
         M(lin) = T.(f);
         sBF.(f) = M;
+    end
+
+    % --- base-flow gradients on the imported grid -----------------------
+    % Computed here so the loadBF base flow carries the same ux..wy fields as
+    % the loadFields path. differentiateField is 2nd-order on the non-uniform
+    % grid and coordinate-based (it differences sBF.x/sBF.y, not row/column
+    % indices), so the later free-stream/wall row flip in importData reorders
+    % these derivatives consistently with the velocity fields they come from.
+    %   <c>x = d<c>/dx (across columns, dim 2);  <c>y = d<c>/dy (down rows, dim 1)
+    if Nx >= 3 && Ny >= 3
+        for c = {'u', 'v', 'w'}
+            comp = c{1};
+            if ~isfield(sBF, comp), continue; end
+            sBF.([comp 'x']) = differentiateField(sBF.(comp), sBF.x, 2);
+            sBF.([comp 'y']) = differentiateField(sBF.(comp), sBF.y, 1);
+        end
+    else
+        warning('importData:gradientsSkipped', ...
+                ['Grid too small for 2nd-order base-flow gradients ', ...
+                 '(Ny=%d, Nx=%d); ux..wy not computed.'], Ny, Nx);
     end
 end
 
