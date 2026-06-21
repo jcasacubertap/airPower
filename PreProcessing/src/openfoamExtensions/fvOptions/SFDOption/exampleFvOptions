@@ -1,0 +1,43 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+// EXAMPLE — copy to <case>/system/fvOptions and set chi / Delta.
+//
+// Requires a TRANSIENT solver (pimpleFoam): SFD integrates a filter ODE in
+// real time and damps the unsteady mode. It does nothing useful under
+// simpleFoam (steady / pseudo-time).
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvOptions;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+SFD1
+{
+    type            selectiveFrequencyDamping;
+    libs            ("libSFDOption.so");   // built by openfoamExtensions/Allwmake
+
+    active          true;       // false => plain Navier-Stokes (no forcing)
+
+    selectionMode   all;        // apply over the whole domain
+    fields          (U);        // velocity field to filter (the only field knob)
+
+    // --- the two inputs the user sets ---
+    chi             0.5;        // gain         [1/s]   need chi   > |omega|/2
+    Delta           10.0;       // filter width [s]     need Delta > 1/|omega|
+    //
+    // omega = angular frequency of the unstable mode to suppress.
+    // For a known leading eigenvalue mu = mu_r + i*mu_i  (mu_i = growth rate,
+    // mu_r = frequency), Casacuberta et al. (2018) double-root form:
+    //   chi*   = (|mu| + mu_i) / 2
+    //   Delta* = 2 / (|mu| - mu_i)
+}
+
+// ************************************************************************* //

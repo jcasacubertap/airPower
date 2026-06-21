@@ -1,0 +1,18 @@
+#!/bin/sh
+#------------------------------------------------------------------------------
+# Build all airPower custom OpenFOAM extensions into $FOAM_USER_LIBBIN.
+#
+# Run ONCE (and after editing any C++ source) inside the OpenFOAM v2312+
+# environment (native install or Docker container):
+#
+#     source $WM_PROJECT_DIR/etc/bashrc      # if not already sourced
+#     ./Allwmake
+#
+# Currently builds:
+#   fvOptions/SFDOption  ->  libSFDOption.so   (Selective Frequency Damping)
+#------------------------------------------------------------------------------
+cd "${0%/*}" || exit 1
+
+wmake libso fvOptions/SFDOption
+
+#------------------------------------------------------------------------------
