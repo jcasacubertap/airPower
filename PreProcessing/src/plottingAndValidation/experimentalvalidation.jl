@@ -4,9 +4,13 @@ using MAT, DelimitedFiles, Printf, LaTeXStrings
     plot_experimental_validation(case_path; savedir, gen, chord_mm, alpha_deg,
                                  x_center_mm, y_center_mm, delta, strip_width)
 
-One subplot per experimental station (x/c), each showing OpenFOAM w-profile
-(line) and PIV w_m z-averaged profile (symbols).  Stations are discovered from
-`Validation/Gen{gen}/Experimental/Case{case_id}/xc{NN}/stats_raw.mat`.
+One subplot per experimental station (x/c), each showing the OpenFOAM w-profile
+(line) and the PIV w_m_mean profile (symbols).  Stations and profiles are read
+from the single `.mat` inside
+`Validation/Gen{gen}/Experimental/Case{case_id}/`, holding an `output` struct:
+    output.xc        (1 x N)      station positions as chord percentages
+    output.y         1 x N cell   each (ny x nz) wall-normal coordinate [mm]
+    output.w_m_mean  1 x N cell   each (ny x nz) z-averaged spanwise velocity [m/s]
 """
 function plot_experimental_validation(case_path::AbstractString;
                                       savedir::AbstractString=case_path,
@@ -18,7 +22,7 @@ function plot_experimental_validation(case_path::AbstractString;
                                       y_center_mm::Float64=0.0,
                                       delta::Float64=0.010,
                                       strip_width::Float64=0.005)
-    # ── Discover experimental stations ──
+    # ── Locate the PIV .mat and read its station list ──
     val_dir = joinpath(ROOT, "PreProcessing", "io", "Validation",
                        "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
@@ -26,21 +30,22 @@ function plot_experimental_validation(case_path::AbstractString;
         return nothing
     end
 
-    station_dirs = filter(d -> startswith(d, "xc") && isdir(joinpath(val_dir, d)),
-                          readdir(val_dir))
-    if isempty(station_dirs)
-        @warn "No xc* station folders in $val_dir"
+    mat_files = filter(f -> isfile(joinpath(val_dir, f)) && endswith(lowercase(f), ".mat"),
+                       readdir(val_dir))
+    if isempty(mat_files)
+        @warn "No PIV .mat file in $val_dir"
         return nothing
     end
+    length(mat_files) > 1 &&
+        @warn "Multiple .mat files in $val_dir — using $(mat_files[1])"
+    piv = matread(joinpath(val_dir, mat_files[1]))["output"]
 
-    # Parse x/c fractions from folder names (e.g. "xc15" → 0.15)
-    stations = Float64[]
-    for sd in station_dirs
-        num = tryparse(Int, replace(sd, "xc" => ""))
-        num === nothing && continue
-        push!(stations, num / 100.0)
-    end
-    sort!(stations)
+    # xc may arrive as a Float64 matrix (Case0) or as a cell array of scalars /
+    # 1×1 arrays (Case1, Matrix{Any}); pull a plain Float64 either way.
+    scalar(v) = v isa Number ? Float64(v) : Float64(first(v))
+    xc_pct   = [scalar(v) for v in vec(piv["xc"])]   # chord percentages, e.g. 20 → x/c=0.20
+    order    = sortperm(xc_pct)
+    stations = xc_pct[order] ./ 100.0
     @info "Experimental stations (x/c): $stations"
 
     # ── Read OpenFOAM field data ──
@@ -90,55 +95,46 @@ function plot_experimental_validation(case_path::AbstractString;
         raw_dn = raw_dn[col]
         raw_f  = raw_f[col]
 
-        dn_min = minimum(raw_dn)
-        wall_dist = raw_dn .- dn_min
-        perm = sortperm(wall_dist)
-        return raw_f[perm], wall_dist[perm]
+        # natural wall-normal distance of each cell from the surface (no anchor)
+        perm = sortperm(raw_dn)
+        return raw_f[perm], raw_dn[perm]
     end
 
-    # ── Read experimental profiles ──
+    # ── Read experimental profiles from the .mat cells ──
+    # w_m_mean is already z-averaged (constant across z); reduce each (ny x nz)
+    # field to a 1-D profile by the per-row valid mean (a no-op for the
+    # pre-averaged data, robust to z dropouts). The profile keeps its own
+    # processed y (output.y) — no wall anchoring, matching the CFD which keeps
+    # its natural cell wall-distance.
+    w_cells = piv["w_m_mean"]
+    y_cells = piv["y"]
     exp_profiles = Dict{Float64, Tuple{Vector{Float64}, Vector{Float64}}}()
-    for xi_c in stations
-        folder = joinpath(val_dir, "xc$(Int(round(xi_c * 100)))")
-        mat_file = joinpath(folder, "stats_raw.mat")
-        if !isfile(mat_file)
-            @warn "Missing $mat_file"
-            continue
-        end
+    for (idx, korig) in enumerate(order)
+        xi_c  = stations[idx]
+        w_exp = Float64.(w_cells[korig])   # (ny, nz), spanwise velocity [m/s]
+        y_exp = Float64.(y_cells[korig])   # (ny, nz), mm (constant across z)
 
-        piv = matread(mat_file)["stats_piv_raw"]["c1"]
-        w_exp = Float64.(piv["w_m"])   # (ny, nz), spanwise velocity [m/s]
-        y_exp = Float64.(piv["y"])     # (ny, nz), mm
-
-        # Average w_m along z (dim 2), ignoring zeros/NaNs
         ny_exp = size(w_exp, 1)
         w_avg  = zeros(ny_exp)
-        y_avg  = y_exp[:, 1] .* 1e-3   # mm → m
+        y_dist = vec(y_exp[:, 1]) .* 1e-3   # mm → m, the PIV-processed wall-normal coordinate
 
         for j in 1:ny_exp
-            row = w_exp[j, :]
+            row   = w_exp[j, :]
             valid = .!isnan.(row) .& (row .!= 0)
-            if any(valid)
-                w_avg[j] = mean(row[valid])
-            else
-                w_avg[j] = NaN
-            end
+            w_avg[j] = any(valid) ? mean(row[valid]) : NaN
         end
 
-        # Locate the wall: y where w is minimum (no-slip → w ≈ 0)
-        valid = .!isnan.(w_avg)
-        wall_idx = argmin(w_avg[valid])
-        y_wall = y_avg[valid][wall_idx]
-
-        # Shift so wall = 0, keep only above wall
-        y_shifted = y_avg .- y_wall
-        mask = valid .& (y_shifted .>= 0)
-        exp_profiles[xi_c] = (w_avg[mask], y_shifted[mask])
-        @info @sprintf("  xc%d: %d points, wall at y = %.3f mm", Int(round(xi_c*100)), sum(mask), y_wall*1e3)
+        # keep the profile at its own processed y — no wall search, no shift
+        keep = .!isnan.(w_avg)
+        exp_profiles[xi_c] = (w_avg[keep], y_dist[keep])
+        @info @sprintf("  xc=%g%%: %d points, y ∈ [%.3f, %.3f] mm",
+                       xc_pct[korig], sum(keep), minimum(y_dist[keep])*1e3, maximum(y_dist[keep])*1e3)
     end
 
-    # ── Plot: one subplot per station ──
-    N = length(stations)
+    # ── Plot: one subplot per station (wrapped into a grid if many) ──
+    N     = length(stations)
+    ncols = min(N, 6)
+    nrows = cld(N, ncols)
     common = (
         framestyle     = :box,
         grid           = true,
@@ -158,7 +154,7 @@ function plot_experimental_validation(case_path::AbstractString;
     for (k, st) in enumerate(stations)
         p = plot(;
             xlabel = L"w \ \mathrm{[m/s]}",
-            ylabel = k == 1 ? L"\mathrm{Wall \ distance \ [m]}" : "",
+            ylabel = mod(k - 1, ncols) == 0 ? L"\mathrm{Wall \ distance \ [m]}" : "",
             ylims  = (0.0, 0.004),
             title  = latexstring("x/c = $(@sprintf("%.0f", st*100))", raw"\%"),
             legend = :topleft,
@@ -185,8 +181,8 @@ function plot_experimental_validation(case_path::AbstractString;
     end
 
     fig = plot(subplots...;
-        layout = (1, N),
-        size   = (350 * N, 450),
+        layout = (nrows, ncols),
+        size   = (350 * ncols, 450 * nrows),
     )
 
     lbl = basename(case_path)
