@@ -49,6 +49,11 @@ include(joinpath(ROOT, "PreProcessing", "src", "source", "blMetrics.jl"))
 # Third-party boundary-layer (IBL) solver bridge (glue to external/ solver)
 include(joinpath(ROOT, "PreProcessing", "src", "thirdParty", "bridge", "runIBL.jl"))
 
+# Wall-modulation scaling: resolve a bump's {A, xCenter} from {Re_k, A/δ*} on the
+# IBL baseline (DFP). Included after runIBL (uses run_ibl_solver) and before the
+# modules (backend/directFlatPlate use dfp_wm at run time).
+include(joinpath(ROOT, "PreProcessing", "src", "source", "wallModulationScaling.jl"))
+
 # Module definitions and pipeline
 include(joinpath(ROOT, "PreProcessing", "src", "source", "pipeline.jl"))
 include(joinpath(ROOT, "PreProcessing", "src", "source", "tunnelToCurvedPlate.jl"))

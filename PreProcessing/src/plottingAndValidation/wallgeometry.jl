@@ -333,17 +333,19 @@ function plot_airfoil_bump_check(; savedir::AbstractString,
         i_peak_arr = argmax(abs.(h_arr))
         peak_h_mm  = h_arr[i_peak_arr]              # signed peak (handles depressions)
         peak_xi    = xi_arr[i_peak_arr]             # chord fraction at the peak
+        xi_start   = xi_arr[first(idx_bump)]        # x/c where the bump begins
+        xi_end     = xi_arr[last(idx_bump)]         # x/c where the bump ends
         bump_width_mm = s_arr[last(idx_bump)] - s_arr[first(idx_bump)]
         s_pad = 0.5 * bump_width_mm
         s_lo  = max(0.0, s_arr[first(idx_bump)] - s_pad)
         s_hi  = s_arr[last(idx_bump)] + s_pad
-        annot_text = @sprintf("h_max = %.3f mm   width = %.2f mm   (x/c) at peak = %.4f",
-                              peak_h_mm, bump_width_mm, peak_xi)
+        annot_text = @sprintf("h_max = %.3f mm    width = %.2f mm\n(x/c)  start = %.4f    peak = %.4f    end = %.4f",
+                              peak_h_mm, bump_width_mm, xi_start, peak_xi, xi_end)
 
         p_h = plot(s_arr ./ 1000.0, h_arr;
             label = false, color = :firebrick, linewidth = 1.5,
             title = "Wall-normal elevation:  $annot_text",
-            titlefontsize = 11,
+            titlefontsize = 10,
             xlims = (s_lo / 1000.0, s_hi / 1000.0),
             xlabel = L"s \ \mathrm{[m]}",
             ylabel = L"h \ \mathrm{[mm]}",

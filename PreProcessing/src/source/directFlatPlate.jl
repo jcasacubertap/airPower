@@ -122,6 +122,11 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             for (i, c) in enumerate(result.ue_pol_coeff)
                 @info "  a$(length(result.ue_pol_coeff)-i) = $(c / result.uinf)"
             end
+
+            # Resolve the wall-modulation bump now: runs the IBL baseline once
+            # when the spec uses scaling targets, and caches {A, xCenter} for the
+            # mesh/run/post/viz steps (no-op for a direct {A, xCenter} spec).
+            inp.wallModulation.enabled && dfp_bump_geometry()
             return result
         end,
 
@@ -129,7 +134,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             write_flat_plate_input_param(case_dir)
             @info "Meshing DirectFlatPlate..."
 
-            wm = merge(inp.wallModulation, inp.DFP.wallModulation)
+            wm = dfp_wm()
             refine_cmds = ""
             # Note: topoSet/refineMesh disabled — it distorts the bump geometry
             # (face centres are averaged, not re-evaluated on the polyLine).
@@ -219,7 +224,7 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
             bl = inp.VAL.valBL ? run_ibl_solver() : nothing
 
             fields = plot_fields(case_dir; savedir=plotting_dir,
-                                 wm=merge(inp.wallModulation, inp.DFP.wallModulation),
+                                 wm=dfp_wm(),
                                  bl=bl)
 
             wval   = nothing

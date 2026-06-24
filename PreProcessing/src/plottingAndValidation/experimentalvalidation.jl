@@ -67,6 +67,12 @@ function plot_experimental_validation(case_path::AbstractString;
 
     mkpath(savedir)
 
+    # Wall-normal bump elevation h(ξ) [m] (nothing when the bump is disabled).
+    # The PIV wall-normal coordinate is anchored at the *real* (bumped) wall, so
+    # the solver's distance — measured from the baseline airfoil surface — is
+    # shifted down by h(ξ) to share that reference.
+    bump_h = bump_h_interp(case_path)
+
     # ── Profile extraction (same logic as fields.jl) ──
     extract_profile = (xv, yv, fv, xi_c) -> begin
         x_s, y_s, nx, ny = airfoil_surface(xi_c;
@@ -95,7 +101,11 @@ function plot_experimental_validation(case_path::AbstractString;
         raw_dn = raw_dn[col]
         raw_f  = raw_f[col]
 
-        # natural wall-normal distance of each cell from the surface (no anchor)
+        # Reference the wall-normal distance to the bumped wall (h above the
+        # baseline surface), matching the PIV anchor. No-op when h ≡ 0.
+        bump_h !== nothing && (raw_dn = raw_dn .- bump_h(xi_c))
+
+        # natural wall-normal distance of each cell from the (bumped) wall
         perm = sortperm(raw_dn)
         return raw_f[perm], raw_dn[perm]
     end

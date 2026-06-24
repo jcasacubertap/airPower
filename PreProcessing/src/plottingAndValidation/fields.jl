@@ -211,6 +211,11 @@ function plot_fields(case_path::AbstractString;
         prof_ylabel   = L"\mathrm{Wall \ distance \ [m]}"
         prof_ylims    = (0.0, 0.004)
 
+        # Wall-normal bump elevation h(ξ) [m] from bumpCheck.csv (nothing when
+        # the bump is disabled). Used to anchor profiles and station markers at
+        # the actual bumped wall instead of the baseline airfoil surface.
+        bump_h = bump_h_interp(case_path)
+
         extract_profile = (xv, yv, fv, xi_c) -> begin
             x_s, y_s, nx, ny = airfoil_surface(xi_c;
                 chord_mm=chord_mm, alpha_deg=alpha_deg,
@@ -239,8 +244,10 @@ function plot_fields(case_path::AbstractString;
             raw_dn = raw_dn[col]
             raw_f  = raw_f[col]
 
-            dn_min = minimum(raw_dn)
-            wall_dist = raw_dn .- dn_min
+            # Anchor at the bumped wall (subtract h(ξ)) when the bump is active;
+            # otherwise fall back to the lowest-cell anchor.
+            wall_dist = bump_h !== nothing ? raw_dn .- bump_h(xi_c) :
+                                             raw_dn .- minimum(raw_dn)
             perm = sortperm(wall_dist)
             return raw_f[perm], wall_dist[perm]
         end
@@ -323,7 +330,11 @@ function plot_fields(case_path::AbstractString;
                 x_s, y_s, nx, ny = airfoil_surface(st;
                     chord_mm=chord_mm, alpha_deg=alpha_deg,
                     x_center_mm=x_center_mm, y_center_mm=y_center_mm)
-                plot!(p_cont, [x_s, x_s + delta * nx], [y_s, y_s + delta * ny];
+                # Lift the marker base onto the bumped wall along the surface
+                # normal (no-op when the bump is disabled).
+                h = bump_h === nothing ? 0.0 : bump_h(st)
+                x0 = x_s + h * nx; y0 = y_s + h * ny
+                plot!(p_cont, [x0, x0 + delta * nx], [y0, y0 + delta * ny];
                       color=colors[mod1(k, length(colors))],
                       linestyle=:dash, linewidth=1.2, label=false)
             end
@@ -372,6 +383,59 @@ function plot_fields(case_path::AbstractString;
         fig_v = make_velocity_figure(v, "v", L"v \ \mathrm{[m/s]}", "vField")
         fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
         p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
+
+        # Bump-centric profile grid (TTCP analogue of the DFP bumpProfiles panel):
+        # 3 fields × 5 stations marching across the hump in ξ/c, with profiles
+        # referenced to the bumped wall (extract_profile already anchors there).
+        bump_sup = bump_h === nothing ? nothing : bump_support_xi(case_path)
+        if bump_sup !== nothing
+            xi_peak, xi_lo, xi_hi = bump_sup
+            bump_w_xi   = xi_hi - xi_lo
+            bump_offsets = [-1.0, -0.5, 0.0, 0.5, 1.0]
+            bump_xi_stns = [clamp(xi_peak + o * bump_w_xi, 0.0, 1.0)
+                            for o in bump_offsets]
+            bump_titles  = [latexstring(@sprintf("\\xi/c = %.3f", st))
+                            for st in bump_xi_stns]
+            wd_ylabel = L"\mathrm{Wall\ distance}\ [\mathrm{m}]"
+
+            bump_fields = [
+                (u, L"u \ \mathrm{[m/s]}"),
+                (v, L"v \ \mathrm{[m/s]}"),
+                (w, L"w \ \mathrm{[m/s]}"),
+            ]
+
+            bump_panels = []
+            for (i, (fv, comp_latex)) in enumerate(bump_fields)
+                for (k, st) in enumerate(bump_xi_stns)
+                    # extract_profile (use_airfoil) already returns wall distance
+                    # measured from the bumped wall, so no extra h subtraction.
+                    fprof, wd_prof = extract_profile(x, y, fv, st)
+                    p_sub = plot(;
+                        common_prof...,
+                        xlabel = comp_latex,
+                        ylabel = k == 1 ? wd_ylabel : "",
+                        title  = i == 1 ? bump_titles[k] : "",
+                        ylims  = prof_ylims,
+                        legend = false)
+                    if !isempty(fprof)
+                        plot!(p_sub, fprof, wd_prof;
+                              color             = :royalblue,
+                              marker            = :circle,
+                              markersize        = 3,
+                              markercolor       = :royalblue,
+                              markerstrokecolor = :black,
+                              markerstrokewidth = 0.5)
+                    end
+                    push!(bump_panels, p_sub)
+                end
+            end
+
+            fig_bump = plot(bump_panels...;
+                layout = (3, 5), size = (1500, 800), dpi = 200)
+            outfile = joinpath(savedir, "bumpProfiles$(label).png")
+            savefig(fig_bump, outfile)
+            @info "Saved: $outfile"
+        end
     elseif use_scatter
         # Deformed DFP (bump): gridded heatmap + vertical strip profiles
         bump_active = wm !== nothing && hasproperty(wm, :enabled) && wm.enabled

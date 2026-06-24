@@ -57,13 +57,23 @@ const inp = (
         # Parallel
         nProcs = 8,
 
-        # Wall modulation position — coordinates relative to domain origin (x=0 at inlet)
-        # Physical distance from virtual LE = xInlet + x.
-        # Shape parameters (A, R, shape, etc.) live in the top-level inp.wallModulation.
+        # Wall modulation — coordinates relative to domain origin (x=0 at inlet).
+        # Physical distance from virtual LE = xInlet + x. Shape parameters (R,
+        # shape, esn/sigmoidal, etc.) live in the top-level inp.wallModulation.
         wallModulation = (
-            # ESN center
-            xCenter = 0.08833,         # [m] bump center
-            # Sigmoidal extents
+            # ── Bump specification: give EXACTLY TWO of {A, xCenter, Rek,
+            #    AoverDstar}; the other two are solved at :prep from the IBL
+            #    baseline (wallModulationScaling.jl). {A, xCenter} = direct
+            #    geometry (no solve). Any Rek/AoverDstar target triggers the IBL
+            #    inversion. A resolved A overrides the shared wallModulation.A.
+            #    (ESN/xCenter only for now; sigmoidal scaling is future work.)
+            A          = 1E-03,        # [m]  bump height       (number, or nothing → solve)
+            xCenter    = 0.08833,      # [m]  ESN bump center   (number, or nothing → solve)
+            Rek        = nothing,      # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
+            AoverDstar = nothing,      # [-]  A / δ*(xCenter)              (target, or nothing)
+
+            # Sigmoidal extents (used only by the sigmoidal shape; not part of
+            # the scaling spec)
             xStart  = 0.155,           # [m] start of bump
             xPeak   = 0.157,           # [m] peak location
             xEnd    = 0.165,           # [m] end of bump

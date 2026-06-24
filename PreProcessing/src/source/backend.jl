@@ -110,7 +110,7 @@ Julia inputs.  The file is auto-generated and should not be edited by hand.
 """
 function write_flat_plate_input_param(case_dir::AbstractString)
     p = inp.DFP
-    wm = merge(inp.wallModulation, p.wallModulation)
+    wm = dfp_wm()   # shared shape ∪ DFP position, with A/xCenter resolved (direct or scaling)
 
     # Compute wall vertex y-displacements [mm] at the 7 block boundaries
     L = p.domainLength

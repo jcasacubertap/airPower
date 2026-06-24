@@ -103,6 +103,56 @@ function airfoil_surface(xi_c::Float64;
 end
 
 """
+    bump_h_interp(case_path) -> Function | Nothing
+
+Build a wall-normal bump-elevation interpolator `h(ξ/c) [m]` from the
+`bumpCheck.csv` that `generateGrid.jl` writes into the case directory when the
+wall bump is active (columns: xi, …, h_mm). Returns `nothing` when the file is
+absent (bump disabled), so callers can treat the un-bumped case as `h ≡ 0`.
+
+The airfoil bump is parameterised in upper-surface arc length, so this CSV — the
+exact samples used to deform the mesh — is the authoritative source of `h(ξ)`;
+re-deriving it here would risk drifting from the mesh.
+"""
+function bump_h_interp(case_path::AbstractString)
+    csv = joinpath(case_path, "bumpCheck.csv")
+    isfile(csv) || return nothing
+    raw = readdlm(csv, ',', Float64; skipstart=1)
+    isempty(raw) && return nothing
+    xi   = raw[:, 1]
+    h_m  = raw[:, 7] ./ 1000.0          # h_mm → m
+    xi_lo, xi_hi = xi[1], xi[end]
+    return function (xi_q::Float64)
+        (xi_q <= xi_lo || xi_q >= xi_hi) && return 0.0
+        j = searchsortedlast(xi, xi_q)
+        j = clamp(j, 1, length(xi) - 1)
+        t = (xi_q - xi[j]) / (xi[j+1] - xi[j])
+        return (1.0 - t) * h_m[j] + t * h_m[j+1]
+    end
+end
+
+"""
+    bump_support_xi(case_path) -> (xi_peak, xi_lo, xi_hi) | Nothing
+
+Read the ξ/c support of the wall bump from `bumpCheck.csv`: the peak location
+and the lower/upper chord fractions where the wall-normal elevation `h` is
+non-zero. The ESN/sigmoidal shapes are truncated to exactly zero outside their
+support in the CSV, so a strict `h > 0` test recovers the same extent the mesh
+used. Returns `nothing` when the file is absent or the bump is effectively flat.
+"""
+function bump_support_xi(case_path::AbstractString)
+    csv = joinpath(case_path, "bumpCheck.csv")
+    isfile(csv) || return nothing
+    raw = readdlm(csv, ',', Float64; skipstart=1)
+    isempty(raw) && return nothing
+    xi  = raw[:, 1]
+    h_m = raw[:, 7] ./ 1000.0
+    idx = findall(>(1e-9), h_m)
+    isempty(idx) && return nothing
+    return (xi[argmax(h_m)], xi[first(idx)], xi[last(idx)])
+end
+
+"""
     plot_profiles(case_path; savedir, stations, delta, filename,
                   chord_mm, alpha_deg, x_center_mm, y_center_mm)
 
