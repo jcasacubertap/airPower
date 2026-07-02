@@ -606,3 +606,129 @@ function plot_fields(case_path::AbstractString;
 
     return (fig_u, fig_v, fig_w, p_pres)
 end
+
+"""
+    _ddy_nonuniform(y, f) → df/dy
+
+First derivative of `f` on a (possibly non-uniform) grid `y`, both sorted by y.
+Interior points use the 3-point non-uniform central stencil (2nd order); the
+ends fall back to one-sided differences. Mirrors the DFP post-processor's
+`diffOrder2NonUniform.m` so Julia and MATLAB agree on wall-normal derivatives.
+"""
+function _ddy_nonuniform(y::Vector{Float64}, f::Vector{Float64})
+    n = length(y)
+    d = zeros(n)
+    n < 2 && return d
+    d[1] = (f[2] - f[1]) / (y[2] - y[1])
+    d[n] = (f[n] - f[n-1]) / (y[n] - y[n-1])
+    @inbounds for i in 2:n-1
+        h1 = y[i]   - y[i-1]
+        h2 = y[i+1] - y[i]
+        d[i] = -h2 / (h1 * (h1 + h2)) * f[i-1] +
+                (h2 - h1) / (h1 * h2) * f[i]   +
+                 h1 / (h2 * (h1 + h2)) * f[i+1]
+    end
+    return d
+end
+
+"""
+    plot_dfp_first_profile(case_path; savedir, filename) → fig
+
+DirectFlatPlate diagnostic: extract the wall-normal column at the *first cell in
+x* (the inlet-most streamwise station) from `postProcessing/midPlane.{csv,bin}`
+and plot the u/v/w profiles and their wall-normal derivatives ∂u/∂y, ∂v/∂y,
+∂w/∂y against y. Writes `firstProfile<label>.png`. Returns the figure, or
+`nothing` if the field file is missing.
+"""
+function plot_dfp_first_profile(case_path::AbstractString;
+                                savedir::AbstractString=case_path,
+                                filename::AbstractString="midPlane.csv")
+    ppdir = joinpath(case_path, "postProcessing")
+    base  = replace(filename, r"\.(csv|bin)$" => "")
+    mid   = isfile(joinpath(ppdir, "$base.csv")) ? joinpath(ppdir, "$base.csv") :
+            isfile(joinpath(ppdir, "$base.bin")) ? joinpath(ppdir, "$base.bin") : nothing
+    if mid === nothing
+        @warn "midPlane.csv/.bin not found in $ppdir"
+        return nothing
+    end
+
+    _, raw = read_midplane(mid)
+    if isempty(raw)
+        @warn "No valid data rows in $mid"
+        return nothing
+    end
+    x_all = Float64.(raw[:, 1]); y_all = Float64.(raw[:, 2]); z_all = Float64.(raw[:, 3])
+    u_all = Float64.(raw[:, 4]); v_all = Float64.(raw[:, 5]); w_all = Float64.(raw[:, 6])
+
+    # One z-layer only (avoids duplicate columns from the cyclic span).
+    z_target = sort(unique(round.(z_all, digits=6)))[1]
+    zm = abs.(z_all .- z_target) .< 1e-5
+    x = x_all[zm]; y = y_all[zm]; u = u_all[zm]; v = v_all[zm]; w = w_all[zm]
+
+    # First streamwise column: snap to the smallest unique x within half the
+    # spacing to the next column (robust to float noise in the cell centres).
+    xu   = sort(unique(round.(x, digits=8)))
+    xcol = xu[1]
+    coltol = length(xu) > 1 ? 0.5 * (xu[2] - xu[1]) : 1.0
+    col  = abs.(x .- xcol) .< coltol
+    if !any(col)
+        @warn "No cells found in the first x-column at x=$xcol"
+        return nothing
+    end
+
+    yc = y[col]
+    perm = sortperm(yc)
+    yc = yc[perm]
+    uc = u[col][perm]; vc = v[col][perm]; wc = w[col][perm]
+    @info @sprintf("First-profile column at x=%.5f m: %d cells, y ∈ [%.4g, %.4g] m",
+                   xcol, length(yc), yc[1], yc[end])
+
+    dudy = _ddy_nonuniform(yc, uc)
+    dvdy = _ddy_nonuniform(yc, vc)
+    dwdy = _ddy_nonuniform(yc, wc)
+
+    common = (
+        framestyle     = :box,
+        grid           = true,
+        gridalpha      = 0.3,
+        tickfontsize   = 10,
+        guidefontsize  = 12,
+        legendfontsize = 9,
+        titlefontsize  = 13,
+        left_margin    = 8Plots.mm,
+        bottom_margin  = 6Plots.mm,
+        right_margin   = 4Plots.mm,
+        top_margin     = 4Plots.mm,
+        linewidth      = 2,
+        dpi            = 200,
+    )
+    cu, cv, cw = :royalblue, :firebrick, :forestgreen
+
+    p_vel = plot(; xlabel=L"u,\ v,\ w \ \mathrm{[m/s]}", ylabel=L"y \ \mathrm{[m]}",
+                 title=latexstring(@sprintf("x = %.4f \\ \\mathrm{m}", xcol)),
+                 legend=:outerright, common...)
+    plot!(p_vel, uc, yc; label=L"u", color=cu, marker=:circle, markersize=2,
+          markerstrokewidth=0, markercolor=cu)
+    plot!(p_vel, vc, yc; label=L"v", color=cv, marker=:circle, markersize=2,
+          markerstrokewidth=0, markercolor=cv)
+    plot!(p_vel, wc, yc; label=L"w", color=cw, marker=:circle, markersize=2,
+          markerstrokewidth=0, markercolor=cw)
+
+    p_der = plot(; xlabel=L"\partial(u,v,w)/\partial y \ \mathrm{[1/s]}",
+                 ylabel=L"y \ \mathrm{[m]}", legend=:outerright, common...)
+    plot!(p_der, dudy, yc; label=L"\partial u/\partial y", color=cu,
+          marker=:circle, markersize=2, markerstrokewidth=0, markercolor=cu)
+    plot!(p_der, dvdy, yc; label=L"\partial v/\partial y", color=cv,
+          marker=:circle, markersize=2, markerstrokewidth=0, markercolor=cv)
+    plot!(p_der, dwdy, yc; label=L"\partial w/\partial y", color=cw,
+          marker=:circle, markersize=2, markerstrokewidth=0, markercolor=cw)
+
+    fig = plot(p_vel, p_der; layout=(1, 2), size=(1300, 500))
+
+    mkpath(savedir)
+    label = basename(case_path)
+    outfile = joinpath(savedir, "firstProfile$(label).png")
+    savefig(fig, outfile)
+    @info "Saved: $outfile"
+    return fig
+end

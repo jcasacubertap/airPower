@@ -227,12 +227,15 @@ function make_direct_flat_plate(backend::BackendType, root::AbstractString)
                                  wm=dfp_wm(),
                                  bl=bl)
 
+            # Inlet-most wall-normal column: u/v/w and their ∂/∂y profiles.
+            firstprof = plot_dfp_first_profile(case_dir; savedir=plotting_dir)
+
             wval   = nothing
             if inp.VAL.valPIV
                 wval = plot_dfp_w_validation(case_dir; savedir=plotting_dir, gen=inp.VAL.Gen, case_id=inp.VAL.Case)
             end
 
-            return (residuals=res, fields=fields, wval=wval, bl=bl)
+            return (residuals=res, fields=fields, firstprof=firstprof, wval=wval, bl=bl)
         end,
 
         :_order => () -> [:clean, :prep, :mesh, :run, :post, :viz],
