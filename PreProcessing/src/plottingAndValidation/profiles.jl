@@ -107,14 +107,21 @@ end
 
 Build a wall-normal bump-elevation interpolator `h(ξ/c) [m]` from the
 `bumpCheck.csv` that `generateGrid.jl` writes into the case directory when the
-wall bump is active (columns: xi, …, h_mm). Returns `nothing` when the file is
-absent (bump disabled), so callers can treat the un-bumped case as `h ≡ 0`.
+wall bump is active (columns: xi, …, h_mm). Returns `nothing` when the bump is
+disabled or the file is absent, so callers can treat the un-bumped case as
+`h ≡ 0`.
 
 The airfoil bump is parameterised in upper-surface arc length, so this CSV — the
 exact samples used to deform the mesh — is the authoritative source of `h(ξ)`;
 re-deriving it here would risk drifting from the mesh.
+
+The `inp.wallModulation.enabled` guard is essential: a `bumpCheck.csv` left over
+from a previous bumped run (or a cloned variant) would otherwise be picked up in
+a clean case and spuriously shift the solver profile below the wall (h > 0 over
+the bump support), producing a mismatch localised to the old bump's ξ-range.
 """
 function bump_h_interp(case_path::AbstractString)
+    inp.wallModulation.enabled || return nothing
     csv = joinpath(case_path, "bumpCheck.csv")
     isfile(csv) || return nothing
     raw = readdlm(csv, ',', Float64; skipstart=1)
@@ -138,9 +145,11 @@ Read the ξ/c support of the wall bump from `bumpCheck.csv`: the peak location
 and the lower/upper chord fractions where the wall-normal elevation `h` is
 non-zero. The ESN/sigmoidal shapes are truncated to exactly zero outside their
 support in the CSV, so a strict `h > 0` test recovers the same extent the mesh
-used. Returns `nothing` when the file is absent or the bump is effectively flat.
+used. Returns `nothing` when the bump is disabled, the file is absent, or the
+bump is effectively flat. (Same stale-`bumpCheck.csv` guard as `bump_h_interp`.)
 """
 function bump_support_xi(case_path::AbstractString)
+    inp.wallModulation.enabled || return nothing
     csv = joinpath(case_path, "bumpCheck.csv")
     isfile(csv) || return nothing
     raw = readdlm(csv, ',', Float64; skipstart=1)
