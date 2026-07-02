@@ -1,157 +1,139 @@
 using MAT, DelimitedFiles, Printf, LaTeXStrings, Statistics
 
 """
-    plot_dfp_w_validation(case_path; savedir, gen)
+    plot_dfp_w_validation(case_path; savedir, gen, case_id)
 
-w-velocity profile validation for the DirectFlatPlate case.
-One subplot per experimental station (x/c), showing OpenFOAM w-profile (line)
-and PIV w_m z-averaged profile (symbols).
+w-velocity profile validation for the DirectFlatPlate case — the flat-plate
+equivalent of the TTCP `plot_experimental_validation`. One subplot per
+experimental station (x/c), showing the OpenFOAM w-profile (line) and the PIV
+z-averaged profile (symbols), wrapped into a grid.
 
-Coordinate mapping: the flat plate arc-length is S = xInlet + x_OpenFOAM.
-The x/c station maps to arc-length via BL.S(BL.x), then to x_DFP = S - xInlet.
+Reads the consolidated PIV `.mat` (a single file directly inside
+`Validation/Gen{gen}/Experimental/Case{case_id}/`) holding an `output` struct —
+the same schema the TTCP reader uses:
+    output.xc        (1 x N)      station positions as chord percentages
+    output.y         1 x N cell   each (ny x nz) wall-normal coordinate [mm]
+    output.w_m_mean  1 x N cell   each (ny x nz) z-averaged spanwise velocity [m/s]
+
+DFP-specific coordinate mapping: the flat-plate arc-length is S = xInlet + x_DFP.
+Each x/c station maps to arc-length via BL.S(BL.x) (from the airfoilFlowData
+`.mat`), then to x_DFP = S − xInlet, where the solver profile is sampled from a
+vertical strip.
 """
 function plot_dfp_w_validation(case_path::AbstractString;
                                savedir::AbstractString=case_path,
                                gen::Int=0,
                                case_id::Int=0)
-    # ── Load reference data for S ↔ x mapping ──
+    # ── Reference data for the S ↔ x mapping ──
     flow_data_dir = joinpath(ROOT, "PreProcessing", "io", "airfoilFlowData")
-    mat_files = filter(f -> endswith(f, ".mat"), readdir(flow_data_dir))
-    if isempty(mat_files)
+    fd = filter(f -> endswith(lowercase(f), ".mat"), readdir(flow_data_dir))
+    if isempty(fd)
         @warn "No .mat files found in $flow_data_dir"
         return nothing
     end
-    BL = matread(joinpath(flow_data_dir, mat_files[1]))["BL"]
+    BL = matread(joinpath(flow_data_dir, fd[1]))["BL"]
     S_ref = vec(BL["S"])     # arc-length [m]
     x_ref = vec(BL["x"])     # chordwise coordinate [m]
     c_ref = BL["c"]          # chord [m]
     xInlet = inp.DFP.xInlet
 
-    # ── Discover experimental stations ──
+    # Map x/c → x_DFP via BL.S(BL.x): S = xInlet + x_DFP.
+    xc_to_xdfp = xi_c -> begin
+        x_chord = xi_c * c_ref
+        idx = clamp(searchsortedlast(x_ref, x_chord), 1, length(x_ref) - 1)
+        t = (x_chord - x_ref[idx]) / (x_ref[idx+1] - x_ref[idx])
+        S_at_xc = (1 - t) * S_ref[idx] + t * S_ref[idx+1]
+        return S_at_xc - xInlet
+    end
+
+    # ── Locate the consolidated PIV .mat and read its station list ──
     val_dir = joinpath(ROOT, "PreProcessing", "io", "Validation",
                        "Gen$gen", "Experimental", "Case$case_id")
     if !isdir(val_dir)
         @warn "Validation directory not found: $val_dir"
         return nothing
     end
-
-    station_dirs = filter(d -> startswith(d, "xc") && isdir(joinpath(val_dir, d)),
-                          readdir(val_dir))
-    if isempty(station_dirs)
-        @warn "No xc* station folders in $val_dir"
+    mat_files = filter(f -> isfile(joinpath(val_dir, f)) && endswith(lowercase(f), ".mat"),
+                       readdir(val_dir))
+    if isempty(mat_files)
+        @warn "No PIV .mat file in $val_dir"
         return nothing
     end
+    length(mat_files) > 1 &&
+        @warn "Multiple .mat files in $val_dir — using $(mat_files[1])"
+    piv = matread(joinpath(val_dir, mat_files[1]))["output"]
 
-    stations = Float64[]
-    for sd in station_dirs
-        num = tryparse(Int, replace(sd, "xc" => ""))
-        num === nothing && continue
-        push!(stations, num / 100.0)
-    end
-    sort!(stations)
+    # xc may arrive as a Float64 matrix or a cell array of scalars / 1×1 arrays;
+    # pull a plain Float64 either way.
+    scalar(v) = v isa Number ? Float64(v) : Float64(first(v))
+    xc_pct   = [scalar(v) for v in vec(piv["xc"])]   # chord percentages
+    order    = sortperm(xc_pct)
+    stations = xc_pct[order] ./ 100.0
     @info "Experimental stations (x/c): $stations"
 
-    # ── Map x/c → x_DFP via BL.S(BL.x) ──
-    # Domain starts at x=0, physical arc-length S = xInlet + x_OpenFOAM
-    function xc_to_xdfp(xi_c)
-        x_chord = xi_c * c_ref
-        # Interpolate S at this x_chord
-        idx = searchsortedlast(x_ref, x_chord)
-        idx = clamp(idx, 1, length(x_ref) - 1)
-        t = (x_chord - x_ref[idx]) / (x_ref[idx+1] - x_ref[idx])
-        S_at_xc = (1 - t) * S_ref[idx] + t * S_ref[idx+1]
-        return S_at_xc - xInlet
-    end
-
-    # ── Read OpenFOAM field data ──
-    csv_path = joinpath(case_path, "postProcessing", "midPlane.csv")
-    if !isfile(csv_path)
-        @warn "midPlane.csv not found at $csv_path"
+    # ── OpenFOAM field data (accepts midPlane.csv or .bin) ──
+    ppdir = joinpath(case_path, "postProcessing")
+    mid   = isfile(joinpath(ppdir, "midPlane.csv")) ? joinpath(ppdir, "midPlane.csv") :
+            isfile(joinpath(ppdir, "midPlane.bin")) ? joinpath(ppdir, "midPlane.bin") : nothing
+    if mid === nothing
+        @warn "midPlane.csv/.bin not found in $ppdir"
         return nothing
     end
-
-    lines = readlines(csv_path)
-    x_of = Float64[]; y_of = Float64[]; w_of = Float64[]
-    for line in lines[2:end]
-        fields = split(line, ',')
-        length(fields) >= 7 || continue
-        vals = tryparse.(Float64, fields)
-        any(isnothing, vals) && continue
-        push!(x_of, vals[1]); push!(y_of, vals[2]); push!(w_of, vals[6])
-    end
-    if isempty(x_of)
-        @warn "No valid data in $csv_path"
+    _, raw = read_midplane(mid)
+    if isempty(raw)
+        @warn "No valid data in $mid"
         return nothing
     end
+    x_of = Float64.(raw[:, 1]); y_of = Float64.(raw[:, 2]); w_of = Float64.(raw[:, 6])
 
     mkpath(savedir)
 
-    # ── Flat plate profile extraction (vertical strip) ──
+    # ── Flat-plate solver profile extraction (vertical strip → wall distance) ──
     domainLength = inp.DFP.domainLength
     strip_w = 0.005 * domainLength
-
     extract_profile = (xv, yv, fv, x_st) -> begin
-        # Find all cells in the strip
-        mask = abs.(xv .- x_st) .< strip_w
-        !any(mask) && return Float64[], Float64[]
-
-        # Use only cells from the nearest x-column to avoid
-        # mixing across bump slope (multiple wall heights)
-        dx = abs.(xv[mask] .- x_st)
-        dx_min = minimum(dx)
-        dx_tol = dx_min + 5e-5  # ~0.05mm tolerance
-        col = dx .<= dx_tol
-
-        y_col = yv[mask][col]
-        f_col = fv[mask][col]
-        # Shift to wall distance (subtract wall height, accounts for bump)
-        y_wall = minimum(y_col)
-        y_dist = y_col .- y_wall
-        perm = sortperm(y_dist)
+        m = abs.(xv .- x_st) .< strip_w
+        any(m) || return Float64[], Float64[]
+        # Snap to the nearest x-column (avoid mixing wall heights across a bump).
+        dxs    = abs.(xv[m] .- x_st)
+        col    = dxs .<= minimum(dxs) + 5e-5   # ~0.05 mm tolerance
+        y_col  = yv[m][col]
+        f_col  = fv[m][col]
+        y_dist = y_col .- minimum(y_col)       # shift to wall distance
+        perm   = sortperm(y_dist)
         return f_col[perm], y_dist[perm]
     end
 
-    # ── Read experimental profiles ──
+    # ── Experimental profiles from the output cells (same as TTCP) ──
+    # w_m_mean is z-averaged; reduce each (ny x nz) field to a 1-D profile by the
+    # per-row valid mean. Keep the profile at its own processed y (no wall shift),
+    # matching the solver which keeps its natural cell wall-distance.
+    w_cells = piv["w_m_mean"]
+    y_cells = piv["y"]
     exp_profiles = Dict{Float64, Tuple{Vector{Float64}, Vector{Float64}}}()
-    for xi_c in stations
-        folder = joinpath(val_dir, "xc$(Int(round(xi_c * 100)))")
-        mat_file = joinpath(folder, "stats_raw.mat")
-        if !isfile(mat_file)
-            @warn "Missing $mat_file"
-            continue
-        end
-
-        piv = matread(mat_file)["stats_piv_raw"]["c1"]
-        w_exp = Float64.(piv["w_m"])
-        y_exp = Float64.(piv["y"])
-
+    for (idx, korig) in enumerate(order)
+        xi_c   = stations[idx]
+        w_exp  = Float64.(w_cells[korig])          # (ny, nz) [m/s]
+        y_exp  = Float64.(y_cells[korig])          # (ny, nz) [mm]
         ny_exp = size(w_exp, 1)
         w_avg  = zeros(ny_exp)
-        y_avg  = y_exp[:, 1] .* 1e-3   # mm → m
-
+        y_dist = vec(y_exp[:, 1]) .* 1e-3          # mm → m
         for j in 1:ny_exp
-            row = w_exp[j, :]
+            row   = w_exp[j, :]
             valid = .!isnan.(row) .& (row .!= 0)
-            if any(valid)
-                w_avg[j] = mean(row[valid])
-            else
-                w_avg[j] = NaN
-            end
+            w_avg[j] = any(valid) ? mean(row[valid]) : NaN
         end
-
-        valid = .!isnan.(w_avg)
-        wall_idx = argmin(w_avg[valid])
-        y_wall = y_avg[valid][wall_idx]
-
-        y_shifted = y_avg .- y_wall
-        mask = valid .& (y_shifted .>= 0)
-        exp_profiles[xi_c] = (w_avg[mask], y_shifted[mask])
-        @info @sprintf("  xc%d: %d points, wall at y = %.3f mm",
-                        Int(round(xi_c*100)), sum(mask), y_wall*1e3)
+        keep = .!isnan.(w_avg)
+        exp_profiles[xi_c] = (w_avg[keep], y_dist[keep])
+        @info @sprintf("  xc=%g%%: %d points, y ∈ [%.3f, %.3f] mm",
+                       xc_pct[korig], sum(keep),
+                       minimum(y_dist[keep])*1e3, maximum(y_dist[keep])*1e3)
     end
 
-    # ── Plot: one subplot per station ──
-    N = length(stations)
+    # ── Plot: one subplot per station, wrapped into a grid (same style as TTCP) ──
+    N     = length(stations)
+    ncols = min(N, 6)
+    nrows = cld(N, ncols)
     common = (
         framestyle     = :box,
         grid           = true,
@@ -167,21 +149,18 @@ function plot_dfp_w_validation(case_path::AbstractString;
         dpi            = 200,
     )
 
-    domainHeight = inp.DFP.domainHeight
     subplots = []
-    for (k, xi_c) in enumerate(stations)
-        x_dfp = xc_to_xdfp(xi_c)
-        @info @sprintf("  x/c=%.2f → x_DFP=%.4f m", xi_c, x_dfp)
-
+    for (k, st) in enumerate(stations)
         p = plot(;
             xlabel = L"w \ \mathrm{[m/s]}",
-            ylabel = k == 1 ? L"\mathrm{Wall \ distance \ [m]}" : "",
+            ylabel = mod(k - 1, ncols) == 0 ? L"\mathrm{Wall \ distance \ [m]}" : "",
             ylims  = (0.0, 0.004),
-            title  = latexstring("x/c = $(@sprintf("%.0f", xi_c*100))", raw"\%"),
+            title  = latexstring("x/c = $(@sprintf("%.0f", st*100))", raw"\%"),
             legend = :topleft,
             common...)
 
-        # OpenFOAM profile
+        # OpenFOAM profile (line)
+        x_dfp = xc_to_xdfp(st)
         if 0 < x_dfp < domainLength
             wprof, yprof = extract_profile(x_of, y_of, w_of, x_dfp)
             if !isempty(wprof)
@@ -192,12 +171,12 @@ function plot_dfp_w_validation(case_path::AbstractString;
             end
         else
             @warn @sprintf("  x/c=%.2f maps to x_DFP=%.4f — outside domain [0, %.3f]",
-                           xi_c, x_dfp, domainLength)
+                           st, x_dfp, domainLength)
         end
 
-        # Experimental profile
-        if haskey(exp_profiles, xi_c)
-            w_e, y_e = exp_profiles[xi_c]
+        # Experimental profile (symbols)
+        if haskey(exp_profiles, st)
+            w_e, y_e = exp_profiles[st]
             scatter!(p, w_e, y_e;
                 label="Experimental", color=:firebrick,
                 marker=:circle, markersize=2, markerstrokewidth=0)
@@ -207,8 +186,8 @@ function plot_dfp_w_validation(case_path::AbstractString;
     end
 
     fig = plot(subplots...;
-        layout = (1, N),
-        size   = (350 * N, 450),
+        layout = (nrows, ncols),
+        size   = (350 * ncols, 450 * nrows),
     )
 
     lbl = basename(case_path)
