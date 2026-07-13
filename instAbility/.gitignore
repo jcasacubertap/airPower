@@ -1,0 +1,54 @@
+# ── instAbility: version CODE only ──────────────────────────────────────
+# Large / generated data (base-flow outputs, solver dumps, grid caches) are
+# NOT tracked here — they travel with the folder-sync to the run machine, not
+# through git. Code-only keeps us under GitHub's 100 MB file limit and avoids
+# repo bloat. Patterns are layout-agnostic (match anywhere) so they still hold
+# now that DeHNSSo lives in a subfolder.
+#
+# DeHNSSo is vendored as plain files; its own git history was relocated to
+# ~/dehnsso-git.bak (upstream: github.com/pcboldini/DeHNSSo).
+
+# --- data / large binaries (base-flow CSV, solver .mat, gz dumps) ---
+*.mat
+*.csv
+*.csv.gz
+*.gz
+*.dat
+*.npy
+*.h5
+*.hdf5
+
+# --- generated output trees ---
+**/output/
+**/output_bf/
+**/gridgen/output/
+
+# --- figures / rendered plots ---
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.eps
+*.fig
+
+# --- MATLAB / build cruft ---
+*.asv
+*.m~
+*.mlx
+*.mlapp
+*.mex*
+*.o
+*.mod
+
+# --- LaTeX paper artifacts ---
+paper/*.aux
+paper/*.log
+paper/*.bbl
+paper/*.blg
+paper/*.out
+paper/*.synctex.gz
+paper/*.fls
+paper/*.fdb_latexmk
+
+# --- macOS ---
+.DS_Store
