@@ -120,21 +120,33 @@ functions
             // window |z|<zTol) guarantees exactly one plane even on 2D-
             // extruded meshes that put multiple cells inside any reasonable
             // tolerance window (e.g. 2 cells in z at ±dz/2).
-            scalar zPlane = zTarget;
+            // Pick the plane deterministically and IDENTICALLY in serial and
+            // parallel. First reduce the nearest cell-centre DISTANCE to a
+            // global minimum, then select the z among the nearest cells,
+            // breaking ties toward the largest z (so every decomposition — and
+            // the serial run — agree on the same plane). The previous
+            // reduce(zPlane, minOp) reduced the z-VALUE, not the distance, so on
+            // a 2-layer spanwise mesh (z = ±dz/2, cyclic) a decomposed run
+            // picked -dz/2 while serial picked +dz/2, exporting a different
+            // (though — for a homogeneous base flow — nearly identical) plane.
+            scalar bestDz = GREAT;
+            forAll(C, cellI)
             {
-                scalar bestDz = GREAT;
-                forAll(C, cellI)
-                {
-                    const scalar zi = C[cellI].z();
-                    const scalar dz = mag(zi - zTarget);
-                    if (dz < bestDz)
-                    {
-                        bestDz = dz;
-                        zPlane = zi;
-                    }
-                }
-                reduce(zPlane, minOp<scalar>());  // deterministic agreement across procs
+                const scalar dz = mag(C[cellI].z() - zTarget);
+                if (dz < bestDz) bestDz = dz;
             }
+            reduce(bestDz, minOp<scalar>());
+
+            scalar zPlane = -GREAT;
+            forAll(C, cellI)
+            {
+                const scalar zi = C[cellI].z();
+                if (mag(zi - zTarget) <= bestDz + SMALL && zi > zPlane)
+                {
+                    zPlane = zi;
+                }
+            }
+            reduce(zPlane, maxOp<scalar>());
 
             // Collect cells whose center is on this single plane (FP match).
             DynamicList<label> cells;
