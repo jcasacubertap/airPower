@@ -82,6 +82,7 @@ functions
         codeInclude
         #{
             #include "OFstream.H"
+            #include "Pstream.H"
             #include <fstream>
         #};
 
@@ -183,100 +184,138 @@ functions
                 }
             }
 
-            const fileName outDir =
-                mesh.time().globalPath()/"postProcessing";
-            mkDir(outDir);
-
-            label totalRows = cells.size() + wallFaces.size();
-
-            if (fmt == "binary")
+            // ── Parallel-safe write ─────────────────────────────────────
+            // This function object runs on EVERY rank. Writing directly would
+            // let all ranks clobber the same midPlane file (interleaved lines,
+            // repeated headers, per-subdomain data) — unreadable downstream.
+            // Instead each rank flattens its rows (8 scalars each), the master
+            // gathers them, and the master is the sole writer. Interior rows
+            // are kept separate from wall rows so the global file preserves the
+            // serial "interior cells, then wall points" ordering. In serial
+            // (nProcs = 1) this reduces to the original single-writer path.
+            // Flatten this rank's rows (8 scalars each) into plain Lists, using
+            // the same pre-sized/indexed idiom as the AirfoilLECase writer.
+            List<scalar> locInterior(cells.size() * 8);
+            forAll(cells, i)
             {
-                const fileName fpath = outDir/"midPlane.bin";
-                std::ofstream ofs(fpath, std::ios::binary);
-
-                int32_t nCols = 8;
-                int64_t nRows = totalRows;
-                ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
-                ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
-
-                // Interior cells
-                forAll(cells, i)
-                {
-                    const label ci = cells[i];
-                    double row[8] =
-                    {
-                        C[ci].x(), C[ci].y(), C[ci].z(),
-                        U[ci].x(), U[ci].y(), U[ci].z(),
-                        p[ci], vort[ci].z()
-                    };
-                    ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
-                }
-
-                // Wall points (u=v=w=0, p and omz from BC)
-                if (wallExtrap)
-                {
-                    label patchID = mesh.boundaryMesh().findPatchID("plate");
-                    const vectorField fc(mesh.boundaryMesh()[patchID].faceCentres());
-                    forAll(wallFaces, i)
-                    {
-                        label fi = wallFaces[i];
-                        double row[8] =
-                        {
-                            fc[fi].x(), fc[fi].y(), fc[fi].z(),
-                            0.0, 0.0, 0.0,
-                            wallP[i], wallOmz[i]
-                        };
-                        ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
-                    }
-                }
-
-                Info<< "writeMidPlane: wrote " << totalRows
-                    << " rows (binary) to " << fpath << endl;
+                const label ci = cells[i];
+                locInterior[8*i + 0] = C[ci].x();
+                locInterior[8*i + 1] = C[ci].y();
+                locInterior[8*i + 2] = C[ci].z();
+                locInterior[8*i + 3] = U[ci].x();
+                locInterior[8*i + 4] = U[ci].y();
+                locInterior[8*i + 5] = U[ci].z();
+                locInterior[8*i + 6] = p[ci];
+                locInterior[8*i + 7] = vort[ci].z();
             }
-            else
+
+            List<scalar> locWall(wallFaces.size() * 8);
+            if (wallExtrap)
             {
-                OFstream os(outDir/"midPlane.csv");
-                // midPlane is the base flow for downstream linear-stability
-                // analysis — write at max double precision (17 digits is the
-                // round-trip-safe value for IEEE 754 binary64).
-                os.precision(17);
-                os << "x,y,z,u,v,w,p,omz" << nl;
-
-                // Interior cells
-                forAll(cells, i)
+                const label patchID = mesh.boundaryMesh().findPatchID("plate");
+                if (patchID >= 0)
                 {
-                    const label ci = cells[i];
-                    os  << C[ci].x() << ","
-                        << C[ci].y() << ","
-                        << C[ci].z() << ","
-                        << U[ci].x() << ","
-                        << U[ci].y() << ","
-                        << U[ci].z() << ","
-                        << p[ci]     << ","
-                        << vort[ci].z() << nl;
-                }
-
-                // Wall points (u=v=w=0, p and omz from BC)
-                if (wallExtrap)
-                {
-                    label patchID = mesh.boundaryMesh().findPatchID("plate");
                     const vectorField fc(mesh.boundaryMesh()[patchID].faceCentres());
                     forAll(wallFaces, i)
                     {
-                        label fi = wallFaces[i];
-                        os  << fc[fi].x() << ","
-                            << fc[fi].y() << ","
-                            << fc[fi].z() << ","
-                            << 0.0 << ","
-                            << 0.0 << ","
-                            << 0.0 << ","
-                            << wallP[i] << ","
-                            << wallOmz[i] << nl;
+                        const label fi = wallFaces[i];
+                        locWall[8*i + 0] = fc[fi].x();
+                        locWall[8*i + 1] = fc[fi].y();
+                        locWall[8*i + 2] = fc[fi].z();
+                        locWall[8*i + 3] = 0.0;
+                        locWall[8*i + 4] = 0.0;
+                        locWall[8*i + 5] = 0.0;
+                        locWall[8*i + 6] = wallP[i];
+                        locWall[8*i + 7] = wallOmz[i];
                     }
                 }
+            }
 
-                Info<< "writeMidPlane: wrote " << totalRows
-                    << " rows (csv) to " << os.name() << endl;
+            // Gather every rank's rows onto the master (mirrors AirfoilLECase).
+            List<List<scalar>> allInterior(Pstream::nProcs());
+            List<List<scalar>> allWall(Pstream::nProcs());
+            allInterior[Pstream::myProcNo()] = locInterior;
+            allWall[Pstream::myProcNo()] = locWall;
+            Pstream::gatherList(allInterior);
+            Pstream::gatherList(allWall);
+
+            if (Pstream::master())
+            {
+                const fileName outDir =
+                    mesh.time().globalPath()/"postProcessing";
+                mkDir(outDir);
+
+                label totalRows = 0;
+                forAll(allInterior, pr) totalRows += allInterior[pr].size() / 8;
+                forAll(allWall, pr)     totalRows += allWall[pr].size() / 8;
+
+                if (fmt == "binary")
+                {
+                    const fileName fpath = outDir/"midPlane.bin";
+                    std::ofstream ofs(fpath, std::ios::binary);
+
+                    int32_t nCols = 8;
+                    int64_t nRows = totalRows;
+                    ofs.write(reinterpret_cast<const char*>(&nCols), sizeof(nCols));
+                    ofs.write(reinterpret_cast<const char*>(&nRows), sizeof(nRows));
+
+                    forAll(allInterior, pr)
+                    {
+                        const List<scalar>& dl = allInterior[pr];
+                        for (label r = 0; r < dl.size(); r += 8)
+                        {
+                            double row[8];
+                            for (int c = 0; c < 8; ++c) row[c] = dl[r + c];
+                            ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
+                        }
+                    }
+                    forAll(allWall, pr)
+                    {
+                        const List<scalar>& dl = allWall[pr];
+                        for (label r = 0; r < dl.size(); r += 8)
+                        {
+                            double row[8];
+                            for (int c = 0; c < 8; ++c) row[c] = dl[r + c];
+                            ofs.write(reinterpret_cast<const char*>(row), sizeof(row));
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << totalRows
+                        << " rows (binary) to " << fpath << endl;
+                }
+                else
+                {
+                    OFstream os(outDir/"midPlane.csv");
+                    // midPlane is the base flow for downstream linear-stability
+                    // analysis — write at max double precision (17 digits is the
+                    // round-trip-safe value for IEEE 754 binary64).
+                    os.precision(17);
+                    os << "x,y,z,u,v,w,p,omz" << nl;
+
+                    forAll(allInterior, pr)
+                    {
+                        const List<scalar>& dl = allInterior[pr];
+                        for (label r = 0; r < dl.size(); r += 8)
+                        {
+                            os  << dl[r]   << "," << dl[r+1] << "," << dl[r+2] << ","
+                                << dl[r+3] << "," << dl[r+4] << "," << dl[r+5] << ","
+                                << dl[r+6] << "," << dl[r+7] << nl;
+                        }
+                    }
+                    forAll(allWall, pr)
+                    {
+                        const List<scalar>& dl = allWall[pr];
+                        for (label r = 0; r < dl.size(); r += 8)
+                        {
+                            os  << dl[r]   << "," << dl[r+1] << "," << dl[r+2] << ","
+                                << dl[r+3] << "," << dl[r+4] << "," << dl[r+5] << ","
+                                << dl[r+6] << "," << dl[r+7] << nl;
+                        }
+                    }
+
+                    Info<< "writeMidPlane: wrote " << totalRows
+                        << " rows (csv) to " << os.name() << endl;
+                }
             }
         #};
     }
