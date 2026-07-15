@@ -1,7 +1,7 @@
-function sRO = reynoldsOrrProdTermsFun(sBF, sPert, inp)
-% REYNOLDSORRPRODTERMSFUN  Reynolds-Orr production of perturbation kinetic energy.
+function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
+% REYNOLDSORRPRODTERMS  Reynolds-Orr production of perturbation kinetic energy.
 %
-%   sRO = reynoldsOrrProdTermsFun(sBF, sPert, inp)
+%   sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 %
 % Production term of the Reynolds-Orr equation for each spanwise-periodic
 % perturbation mode, integrated in the spanwise (z) direction:
