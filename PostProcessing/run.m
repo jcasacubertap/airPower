@@ -30,7 +30,7 @@ switch lower(inp.task)
                   ['productionAnalysis needs perturbation data — ', ...
                    'set inp.loadMode = ''loadFields''.']);
         end
-        sRO = reynoldsOrrProdTermsFun(sBF, sPert, inp);
+        sRO = reynoldsOrrProdTerms(sBF, sPert, inp);
         plotReynoldsOrrProd(sRO, sBF, inp);     % total P    -> io/plotting/reynoldsOrrProd.png
         plotReynoldsOrrDecomp(sRO, sBF, inp);   % I1..I4     -> io/plotting/reynoldsOrrDecomp.png
 

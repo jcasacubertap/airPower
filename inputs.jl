@@ -32,13 +32,13 @@ const inp = (
     # ======================================================================
     DFP = (
         # Domain geometry 
-        domainLength = 0.650, # [m]
+        domainLength = 0.325,    #0.650, # [m]
         domainHeight = 0.020046, # [m]
 
         # Inflow parameters
         Uinf   = 12.417927662146404,                 # chordwise velocity [m/s]
-        Winf   = 20.59,         # spanwise velocity [m/s]
-        xInlet = 0.046694057793992,         # inlet position (distance from virtual LE) [m]
+        Winf   = 20.59,                              # spanwise velocity [m/s]
+        xInlet = 0.046694057793992,                  # inlet position (distance from virtual LE) [m]
 
         # Top-boundary pressure polynomial (Casacuberta et al, 2022)
         pa4 = 0.004709401639645,
@@ -51,8 +51,8 @@ const inp = (
         freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
-        gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
-        gridYfactor = 1,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
+        gridXfactor = 4,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
+        gridYfactor = 2,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
 
         # Parallel
         nProcs = 8,

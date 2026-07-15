@@ -50,7 +50,7 @@ function [sBF, sPert, inp] = importData(inp)
     %   row 1   (1,:)   = free-stream
     %   row end (end,:) = wall
     % Applied here, at the single load entry point, so all downstream consumers
-    % and any matrix assembly (e.g. reynoldsOrrProdTermsFun) can rely on it. The
+    % and any matrix assembly (e.g. reynoldsOrrProdTerms) can rely on it. The
     % base-flow gradients (ux..wy) are Ny x Nx too, so they flip together with
     % the velocity fields and stay co-registered.
     [sBF, sPert] = orientFreestreamToWall(sBF, sPert);

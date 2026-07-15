@@ -42,7 +42,7 @@ inp.validationFile = 'dataExtCrossA.mat';
 %% -- productionAnalysis  (Reynolds-Orr) --
 % Needs perturbation data (loadMode='loadFields'). No factor-2 correction: a
 % stability code already combines the mode + its cc in the field array (see
-% reynoldsOrrProdTermsFun header).
+% reynoldsOrrProdTerms header).
 inp.ro.modeIdx   = [];        % [] -> all spanwise modes with beta>0 (MFD excluded)
 inp.ro.xLim      = [];        % [xmin xmax] integration window (base-flow x units); [] -> full
 inp.ro.yLim      = [];        % [ymin ymax] integration window; [] -> full
