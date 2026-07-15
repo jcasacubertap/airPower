@@ -498,7 +498,10 @@ function plot_fields(case_path::AbstractString;
         fig_w = make_velocity_figure(w, "w", L"w \ \mathrm{[m/s]}", "wField")
         p_pres = make_velocity_figure(p, "p", L"p \ \mathrm{[m^2/s^2]}", "pressure")
 
-        # Bump-centric profile grid (4 fields × 5 stations spaced by bump width)
+        # ── Bump comparison figure ──────────────────────────────────────
+        # Top: spanwise-velocity contour about the bump with the 5 sampling
+        # stations marked. Below: u and w wall-normal profiles at those stations
+        # (v omitted), one column per station, colour-keyed to the contour.
         if bump_active
             if wm.shape == :esn
                 bump_xs_b, bump_xe_b = _esn_geometry_full(wm)
@@ -507,50 +510,93 @@ function plot_fields(case_path::AbstractString;
                 bump_xs_b, bump_xe_b = wm.xStart, wm.xEnd
                 xc_bump = (wm.xStart + wm.xEnd) / 2
             end
-            bump_w_b = bump_xe_b - bump_xs_b
+            bump_w_b     = bump_xe_b - bump_xs_b
             bump_offsets = [-1.0, -0.5, 0.0, 0.5, 1.0]
             bump_x_stns  = [xc_bump + o * bump_w_b for o in bump_offsets]
-            bump_titles  = [latexstring(@sprintf("x = %.4f \\ \\mathrm{m}", st))
-                            for st in bump_x_stns]
 
-            y_b_lo = minimum(y); y_b_hi = maximum(y)
-            bump_ylims = (0.0, (y_b_hi - y_b_lo) / 8)
+            # Per-station colours tie each contour line to its profile column.
+            stn_cols   = [colors[mod1(k, length(colors))] for k in 1:5]
+            stn_titles = [L"x_c\!-\!w_b", L"x_c\!-\!w_b/2", L"x_c",
+                          L"x_c\!+\!w_b/2", L"x_c\!+\!w_b"]
+
+            y_b_lo = minimum(y)
+            wd_h   = (maximum(y) - y_b_lo) / 8          # near-wall window height
+            bump_ylims = (0.0, wd_h)
             wd_ylabel  = L"\mathrm{Wall\ distance}\ [\mathrm{m}]"
 
-            bump_fields = [
-                (u, L"u \ \mathrm{[m/s]}"),
-                (v, L"v \ \mathrm{[m/s]}"),
-                (w, L"w \ \mathrm{[m/s]}"),
-            ]
-
-            bump_panels = []
-            for (i, (fv, comp_latex)) in enumerate(bump_fields)
-                for (k, st) in enumerate(bump_x_stns)
-                    fprof, yprof = extract_profile(x, y, fv, st)
-                    y_wall_st = wall_bump(st, wm)
-                    wd_prof = yprof .- y_wall_st
-                    p_sub = plot(;
-                        common_prof...,
-                        xlabel = comp_latex,
-                        ylabel = k == 1 ? wd_ylabel : "",
-                        title  = i == 1 ? bump_titles[k] : "",
-                        ylims  = bump_ylims,
-                        legend = false)
-                    if !isempty(fprof)
-                        plot!(p_sub, fprof, wd_prof;
-                              color             = :royalblue,
-                              marker            = :circle,
-                              markersize        = 3,
-                              markercolor       = :royalblue,
-                              markerstrokecolor = :black,
-                              markerstrokewidth = 0.5)
-                    end
-                    push!(bump_panels, p_sub)
-                end
+            # ── Top: w contour, framed symmetrically about the bump so the 5
+            #    stations sit at the 5 profile-column centres below. ──
+            xg, yg, Wg = scatter_to_grid(x, y, w; nx=800, ny=320, fill_iters=20)
+            xlo   = max(xg[1],   xc_bump - 1.25 * bump_w_b)
+            xhi   = min(xg[end], xc_bump + 1.25 * bump_w_b)
+            y_top = y_b_lo + wd_h
+            p_cmap = heatmap(xg, yg, Wg;
+                color          = :viridis,
+                colorbar       = true,
+                colorbar_title = L"w \ \mathrm{[m/s]}",
+                xlims          = (xlo, xhi),
+                ylims          = (yg[1], y_top),
+                xlabel         = L"x \ \mathrm{[m]}",
+                ylabel         = L"y \ \mathrm{[m]}",
+                title          = L"\mathrm{Spanwise\ velocity\ about\ the\ wall\ bump}",
+                framestyle     = :box,
+                tickfontsize   = 10, guidefontsize = 12, titlefontsize = 13,
+                left_margin    = 10Plots.mm, right_margin = 6Plots.mm,
+                top_margin     = 5Plots.mm,  bottom_margin = 7Plots.mm,
+                linewidth      = 0, dpi = 200)
+            # White mask below the (bumped) wall — its upper edge draws the bump.
+            xs_b = collect(range(xlo, xhi, length=600))
+            ys_b = [wall_bump(xi, wm) for xi in xs_b]
+            plot!(p_cmap, [xs_b; reverse(xs_b)], [ys_b; fill(yg[1], length(xs_b))];
+                  seriestype=:shape, fillcolor=:white, linecolor=:white,
+                  linewidth=0, label=false)
+            for (k, st) in enumerate(bump_x_stns)
+                (xlo <= st <= xhi) || continue
+                vline!(p_cmap, [st]; color=stn_cols[k], linestyle=:dash,
+                       linewidth=1.8, label=false)
+                # Numbered badge linking this line to its profile column below.
+                scatter!(p_cmap, [st], [y_top * 0.9]; markershape=:circle,
+                         markersize=9, markercolor=stn_cols[k],
+                         markerstrokecolor=:white, markerstrokewidth=1.0,
+                         label=false)
+                annotate!(p_cmap, st, y_top * 0.9, text(string(k), 8, :white, :center))
             end
 
-            fig_bump = plot(bump_panels...;
-                layout = (3, 5), size = (1500, 800), dpi = 200)
+            # ── Below: u and w profiles, one column per station ──
+            # Shared x-limits per row so the stations are directly comparable.
+            build_row = (fv, comp_latex, is_top) -> begin
+                profs = [extract_profile(x, y, fv, st) for st in bump_x_stns]
+                vmax  = maximum(pr -> isempty(pr[1]) ? 0.0 : maximum(pr[1]), profs)
+                vmin  = minimum(pr -> isempty(pr[1]) ? 0.0 : minimum(pr[1]), profs)
+                xr    = (min(0.0, vmin) - 0.03 * abs(vmax), 1.05 * vmax)
+                row = Any[]
+                for (k, st) in enumerate(bump_x_stns)
+                    fprof, yprof = profs[k]
+                    wd_prof = yprof .- wall_bump(st, wm)
+                    p_sub = plot(; common_prof...,
+                        xlabel = comp_latex,
+                        ylabel = k == 1 ? wd_ylabel : "",
+                        title  = is_top ? stn_titles[k] : "",
+                        xlims  = xr, ylims = bump_ylims, legend = false)
+                    if !isempty(fprof)
+                        plot!(p_sub, fprof, wd_prof;
+                              color=stn_cols[k], marker=:circle, markersize=2.6,
+                              markercolor=stn_cols[k], markerstrokecolor=:black,
+                              markerstrokewidth=0.3)
+                    end
+                    push!(row, p_sub)
+                end
+                return row
+            end
+            u_panels = build_row(u, L"u \ \mathrm{[m/s]}", true)
+            w_panels = build_row(w, L"w \ \mathrm{[m/s]}", false)
+
+            lay = @layout([ cmap{0.34h}
+                            grid(2, 5) ])
+            fig_bump = plot(p_cmap, u_panels..., w_panels...;
+                layout = lay, size = (1650, 950), dpi = 200,
+                plot_title = L"\mathrm{Base\!-\!flow\ profiles\ across\ the\ wall\ bump}",
+                plot_titlefontsize = 15)
             outfile = joinpath(savedir, "bumpProfiles$(label).png")
             savefig(fig_bump, outfile)
             @info "Saved: $outfile"

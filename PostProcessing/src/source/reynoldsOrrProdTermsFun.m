@@ -1,302 +1,211 @@
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%                      Jordi Casacuberta                               %%
-%%                            2021                                      %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%Function to compute the production term of the Reynolds-Orr equation
+function sRO = reynoldsOrrProdTermsFun(sBF, sPert, inp)
+% REYNOLDSORRPRODTERMSFUN  Reynolds-Orr production of perturbation kinetic energy.
 %
-% > Inputs: base flow (sBF), perturbation field (foZu/v/w)
-% > Outputs: production (sub-)terms (sROProd)
-% 
+%   sRO = reynoldsOrrProdTermsFun(sBF, sPert, inp)
+%
+% Production term of the Reynolds-Orr equation for each spanwise-periodic
+% perturbation mode, integrated in the spanwise (z) direction:
+%
+%   P = - lambda_z * sum_{i,j}  < u'_i u'_j >_z  dU_i/dx_j ,
+%
+%   i in {u,v,w},  j in {x,y}   (the base flow is spanwise-homogeneous, d/dz=0),
+%   < u'_i u'_j >_z = Re( q_i conj(q_j) )     (see NORMALIZATION note below),
+%   lambda_z = 2*pi/beta                       (from integrating 1 dz over a period).
+%
+% Full 3-D: the crossflow terms w', dW/dx, dW/dy are included. (The 2021
+% original zeroed them for a 2-D TS case — see reynoldsOrrProdTermsFun_legacy2021.m.)
+% Also returns the tangential/normal decomposition I1..I4 (I1+I2+I3+I4 = P),
+% ported exactly from that script apart from the factor 2 (see NORMALIZATION).
+%
+% INPUTS (from importData, loadMode='loadFields'):
+%   sBF   base flow on the stability grid, Ny x Nx, rows free-stream(1,:)->wall(end,:):
+%         .x .y (meshgrid), .u .v .w, gradients .ux .uy .vx .vy .wx .wy
+%   sPert perturbation modes (full, amplitude-scaled fields from importData):
+%         .u .v .w  (Nmode x Ny x Nx) complex perturbation (NOT normalized)
+%         .beta     (1 x Nmode)       spanwise wavenumber of each mode
+%   inp.ro (all optional):
+%         .modeIdx    modes to process (default: all with beta>0; beta=0 MFD excluded)
+%         .xLim,.yLim integration window in base-flow units (default: full domain)
+%
+% OUTPUT sRO:
+%   .beta    (1 x M)         spanwise wavenumber of each processed mode
+%   .P       (Ny x Nx x M)   production field per mode
+%   .intP    (1 x M)         volume integral of P over the window (signed)
+%   .intAbsP (1 x M)         volume integral of |P| over the window
+%   .peakAmp (1 x M)         max|u'| per mode (amplitude sanity-check)
+%   .I1..I4  (Ny x Nx x M)   tangential/normal production decomposition:
+%                            I1 normal-normal, I2 tang-normal, I3 normal-tang,
+%                            I4 tang-tang.  I1+I2+I3+I4 = P.
+%   .I2a..I2f, .I4a..I4f     per-base-flow-gradient sub-terms of I2 and I4
+%   .x .y                    the grid (Ny x Nx)
 
-%% 0.- Data loading and definition of inputs 
+    % ---- validate inputs ----
+    need = {'x','y','u','v','w','ux','uy','vx','vy','wx','wy'};
+    miss = need(~isfield(sBF, need));
+    if ~isempty(miss)
+        error('reynoldsOrr:sBF', 'sBF missing field(s): %s', strjoin(miss, ', '));
+    end
+    if ~all(isfield(sPert, {'u','v','w','beta'}))
+        error('reynoldsOrr:sPert', ...
+              'sPert needs .u/.v/.w (Nmode x Ny x Nx, full fields) and .beta (1 x Nmode).');
+    end
+    [Ny, Nx] = size(sBF.u);
 
-%% Modal information
-%Number of modes
-aux.Nh   = 1;
-%Primary spanwise wavenumber
-aux.beta = 9.64; 
+    % ---- options (inp.ro overrides these defaults) ----
+    ro = struct('modeIdx', [], 'xLim', [], 'yLim', []);
+    if isfield(inp, 'ro') && ~isempty(inp.ro)
+        f = fieldnames(inp.ro);
+        for i = 1:numel(f)
+            if isfield(ro, f{i}), ro.(f{i}) = inp.ro.(f{i}); end
+        end
+    end
 
-%% Base flow
-sBF.u  = BF.u;
-sBF.v  = BF.v;
-sBF.w  = 0.*BF.u;
-sBF.ux = BF.dxU;
-sBF.uy = BF.dyU;
-sBF.vx = BF.dxV;
-sBF.vy = BF.dyV;
-sBF.wx = 0.*BF.dxU;
-sBF.wy = 0.*BF.dyU;
-
-%% Perturbation amplitude functions
-foZu.A(:,:,1)     = abs(u);
-foZu.Phase(:,:,1) = angle(u);
-foZv.A(:,:,1)     = abs(v);
-foZv.Phase(:,:,1) = angle(v);
-foZw.A(:,:,1)     = 0.*abs(u);
-foZw.Phase(:,:,1) = 0.*angle(u);
-
-%% 1.- Computation of Reynolds-Orr (global) production term (inherently integrated in z)
-
-%Total production term (iterate along Fourier modes)
-for k = 1:aux.Nh
-    
-    %Total production term (integrated in z)
-    sROProd.P(:,:,k)  = -  ( 2 * real(foZu.A(:,:,k) ./ 2 .* exp(1i * foZu.Phase(:,:,k)) .* foZu.A(:,:,k) ./ 2 .* exp(-1i * foZu.Phase(:,:,k))) .* sBF.ux ...
-                           + 2 * real(foZu.A(:,:,k) ./ 2 .* exp(1i * foZu.Phase(:,:,k)) .* foZv.A(:,:,k) ./ 2 .* exp(-1i * foZv.Phase(:,:,k))) .* sBF.uy ...
-                           + 2 * real(foZv.A(:,:,k) ./ 2 .* exp(1i * foZv.Phase(:,:,k)) .* foZu.A(:,:,k) ./ 2 .* exp(-1i * foZu.Phase(:,:,k))) .* sBF.vx ...
-                           + 2 * real(foZv.A(:,:,k) ./ 2 .* exp(1i * foZv.Phase(:,:,k)) .* foZv.A(:,:,k) ./ 2 .* exp(-1i * foZv.Phase(:,:,k))) .* sBF.vy ...
-                           + 2 * real(foZw.A(:,:,k) ./ 2 .* exp(1i * foZw.Phase(:,:,k)) .* foZu.A(:,:,k) ./ 2 .* exp(-1i * foZu.Phase(:,:,k))) .* sBF.wx ...  
-                           + 2 * real(foZw.A(:,:,k) ./ 2 .* exp(1i * foZw.Phase(:,:,k)) .* foZv.A(:,:,k) ./ 2 .* exp(-1i * foZv.Phase(:,:,k))) .* sBF.wy ...     
-                           ) ;
-    
-    %Add the constant factor (coming from integrating int(1 dz) = lambda_z)
-    sROProd.P(:,:,k) = sROProd.P(:,:,k) .* (2*pi/aux.beta);
-                                            
-    %Fill with 0s inside the solid boundary 
-    %if rough.include == true && rough.type(1) == 1
-    %    sROProd.P(rough.hPos+1:end,rough.xPos:end,k) = 0;   
-    %end
-end
-
-%% 4.- Computation of Reynolds-Orr production term decomposed following the
-%%     tangential-to-normal decomposition 
-for k = 1:aux.Nh
-    
-    %% Define auxiliary variables 
-    
-    %Note that the amplitude functions are divided by a factor 2 to
-    %account for the original -N to N Fourier series
-    
-    %Module of base-flow vector field
-    aux.moduleBF        = sqrt(sBF.u.^2 + sBF.v.^2 + sBF.w.^2);
-    
-    %Compute auxiliary functions gamma(x,y) and psi(x,y) and xi(x,y)
-    aux.gamma1(:,:,k)   = foZu.A(:,:,k) ./ 2 .* sBF.u .* cos(foZu.Phase(:,:,k)) +...
-                          foZv.A(:,:,k) ./ 2 .* sBF.v .* cos(foZv.Phase(:,:,k)) +...
-                          foZw.A(:,:,k) ./ 2 .* sBF.w .* cos(foZw.Phase(:,:,k));
-
-    aux.gamma2(:,:,k)   = -foZu.A(:,:,k) ./ 2 .* sBF.u .* sin(foZu.Phase(:,:,k)) +...
-                          -foZv.A(:,:,k) ./ 2 .* sBF.v .* sin(foZv.Phase(:,:,k)) +...
-                          -foZw.A(:,:,k) ./ 2 .* sBF.w .* sin(foZw.Phase(:,:,k));
-
-    aux.psi1(:,:,k)     = (foZu.A(:,:,k) ./ 2).^2 .* cos(2 .* foZu.Phase(:,:,k)) +...
-                          (foZv.A(:,:,k) ./ 2).^2 .* cos(2 .* foZv.Phase(:,:,k)) +...
-                          (foZw.A(:,:,k) ./ 2).^2 .* cos(2 .* foZw.Phase(:,:,k));
-
-    aux.psi2(:,:,k)     = -(foZu.A(:,:,k) ./ 2).^2 .* sin(2 .* foZu.Phase(:,:,k)) +...
-                          -(foZv.A(:,:,k) ./ 2).^2 .* sin(2 .* foZv.Phase(:,:,k)) +...
-                          -(foZw.A(:,:,k) ./ 2).^2 .* sin(2 .* foZw.Phase(:,:,k));
-
-    aux.xi(:,:,k)       = sqrt(aux.gamma1(:,:,k).^2 + aux.gamma2(:,:,k).^2) ./ aux.moduleBF.^2;
-    
-    %% Elements of the tangential vector
-    
-    %'Shape' of vector components
-    %First component
-    aux.shapeTangA(:,:,k) = (sqrt(aux.gamma1(:,:,k).^2 + aux.gamma2(:,:,k).^2)) ./ (aux.moduleBF).^2 .* sBF.u;
-    
-    %Second component
-    aux.shapeTangB(:,:,k) = (sqrt(aux.gamma1(:,:,k).^2 + aux.gamma2(:,:,k).^2)) ./ (aux.moduleBF).^2 .* sBF.v;
-    
-    %Third component
-    aux.shapeTangC(:,:,k) = (sqrt(aux.gamma1(:,:,k).^2 + aux.gamma2(:,:,k).^2)) ./ (aux.moduleBF).^2 .* sBF.w;
-    
-    %Phase of tangential component
-    hlp.phaseTang(:,:,k) = atan2(-aux.gamma2(:,:,k),aux.gamma1(:,:,k));
-    
-    %Fourier coefficient of vector components
-    %First component
-    aux.FCTangA(:,:,k) = aux.shapeTangA(:,:,k) .* exp(1i * hlp.phaseTang(:,:,k));
-    
-    %Second component
-    aux.FCTangB(:,:,k) = aux.shapeTangB(:,:,k) .* exp(1i * hlp.phaseTang(:,:,k));
-    
-    %Third component
-    aux.FCTangC(:,:,k) = aux.shapeTangC(:,:,k) .* exp(1i * hlp.phaseTang(:,:,k));
-    
-    %% Elements of the normal vector
-    
-    %Phase of vector components
-    %First component
-    aux.phaseNormA(:,:,k) = atan2(foZu.A(:,:,k)./2 .* sin(foZu.Phase(:,:,k)) - sBF.u .* aux.xi(:,:,k) .* sin(hlp.phaseTang(:,:,k)),...
-                                  foZu.A(:,:,k)./2 .* cos(foZu.Phase(:,:,k)) - sBF.u .* aux.xi(:,:,k) .* cos(hlp.phaseTang(:,:,k)));
-                              
-    %Second component
-    hlp.phaseNormB(:,:,k) = atan2(foZv.A(:,:,k)./2 .* sin(foZv.Phase(:,:,k)) - sBF.v .* aux.xi(:,:,k) .* sin(hlp.phaseTang(:,:,k)),...
-                                  foZv.A(:,:,k)./2 .* cos(foZv.Phase(:,:,k)) - sBF.v .* aux.xi(:,:,k) .* cos(hlp.phaseTang(:,:,k)));
-                              
-    %Third component
-    hlp.phaseNormC(:,:,k) = atan2(foZw.A(:,:,k)./2 .* sin(foZw.Phase(:,:,k)) - sBF.w .* aux.xi(:,:,k) .* sin(hlp.phaseTang(:,:,k)),...
-                                  foZw.A(:,:,k)./2 .* cos(foZw.Phase(:,:,k)) - sBF.w .* aux.xi(:,:,k) .* cos(hlp.phaseTang(:,:,k)));
-    
-    %'Shape' of vector components
-    %First component
-    aux.shapeNormA(:,:,k) = sqrt((foZu.A(:,:,k)./2).^2 + sBF.u.^2 .* aux.xi(:,:,k).^2 -2.*sBF.u.*aux.xi(:,:,k).*abs(foZu.A(:,:,k)./2).*cos(foZu.Phase(:,:,k) - hlp.phaseTang(:,:,k)));
-    
-    %Second component
-    hlp.shapeNormB(:,:,k) = sqrt((foZv.A(:,:,k)./2).^2 + sBF.v.^2 .* aux.xi(:,:,k).^2 -2.*sBF.v.*aux.xi(:,:,k).*abs(foZv.A(:,:,k)./2).*cos(foZv.Phase(:,:,k) - hlp.phaseTang(:,:,k)));
-    
-    %Third component
-    hlp.shapeNormC(:,:,k) = sqrt((foZw.A(:,:,k)./2).^2 + sBF.w.^2 .* aux.xi(:,:,k).^2 -2.*sBF.w.*aux.xi(:,:,k).*abs(foZw.A(:,:,k)./2).*cos(foZw.Phase(:,:,k) - hlp.phaseTang(:,:,k)));
-    
-    %Fourier coefficient of vector components
-    %First component
-    aux.FCNormA(:,:,k) = aux.shapeNormA(:,:,k) .* exp(1i * aux.phaseNormA(:,:,k));
-    
-    %Second component
-    aux.FCNormB(:,:,k) = hlp.shapeNormB(:,:,k) .* exp(1i * hlp.phaseNormB(:,:,k));
-    
-    %Third component
-    aux.FCNormC(:,:,k) = hlp.shapeNormC(:,:,k) .* exp(1i * hlp.phaseNormC(:,:,k));
-    
-    %% Modulus of the full tangential and normal vector
-    
-    %Norm of total vector, i.e., ||v'||(x,y)
-    aux.shapeTot(:,:,k) = sqrt((foZu.A(:,:,k)./2).^2 + (foZv.A(:,:,k)./2).^2 + (foZw.A(:,:,k)./2).^2);
-
-    %Norm of tangential vector, i.e., ||vt'||(x,y)
-    hlp.shapeTang(:,:,k) = (sqrt(aux.gamma1(:,:,k).^2 + aux.gamma2(:,:,k).^2)) ./ (aux.moduleBF);
-
-    %Norm of normal vector, i.e., ||vn'||(x,y). Pitagorian
-    %expression is applicable in complex vector space as well
-    hlp.shapeNorm(:,:,k) = sqrt(aux.shapeTot(:,:,k).^2 - hlp.shapeTang(:,:,k).^2);
-    
-    %% Compute decomposed production terms
-    
-    %Terms of I1
-    aux.I1a(:,:,k) = 2 .* sBF.ux .* real(aux.FCNormA(:,:,k) .* conj(aux.FCNormA(:,:,k)));
-    aux.I1b(:,:,k) = 2 .* sBF.uy .* real(aux.FCNormA(:,:,k) .* conj(aux.FCNormB(:,:,k)));
-    aux.I1c(:,:,k) = 2 .* sBF.vx .* real(aux.FCNormB(:,:,k) .* conj(aux.FCNormA(:,:,k)));
-    aux.I1d(:,:,k) = 2 .* sBF.vy .* real(aux.FCNormB(:,:,k) .* conj(aux.FCNormB(:,:,k)));
-    aux.I1e(:,:,k) = 2 .* sBF.wx .* real(aux.FCNormC(:,:,k) .* conj(aux.FCNormA(:,:,k)));
-    aux.I1f(:,:,k) = 2 .* sBF.wy .* real(aux.FCNormC(:,:,k) .* conj(aux.FCNormB(:,:,k)));
-    
-    %I1 itself
-    aux.I1(:,:,k)     = - (2*pi/aux.beta) .* (aux.I1a(:,:,k) + aux.I1b(:,:,k) + aux.I1c(:,:,k) + aux.I1d(:,:,k) + aux.I1e(:,:,k) + aux.I1f(:,:,k));
-    sROProd.I1(:,:,k) = aux.I1(:,:,k);
-    
-    %Terms of I2 (hlp contains each term with factor for comparison with In)
-    aux.I2a(:,:,k) = 2 .* sBF.ux .* real(aux.FCTangA(:,:,k) .* conj(aux.FCNormA(:,:,k))); hlp.I2a(:,:,k) = - (2*pi/aux.beta) .* aux.I2a(:,:,k);
-    aux.I2b(:,:,k) = 2 .* sBF.uy .* real(aux.FCTangA(:,:,k) .* conj(aux.FCNormB(:,:,k))); hlp.I2b(:,:,k) = - (2*pi/aux.beta) .* aux.I2b(:,:,k);
-    aux.I2c(:,:,k) = 2 .* sBF.vx .* real(aux.FCTangB(:,:,k) .* conj(aux.FCNormA(:,:,k))); hlp.I2c(:,:,k) = - (2*pi/aux.beta) .* aux.I2c(:,:,k);
-    aux.I2d(:,:,k) = 2 .* sBF.vy .* real(aux.FCTangB(:,:,k) .* conj(aux.FCNormB(:,:,k))); hlp.I2d(:,:,k) = - (2*pi/aux.beta) .* aux.I2d(:,:,k);
-    aux.I2e(:,:,k) = 2 .* sBF.wx .* real(aux.FCTangC(:,:,k) .* conj(aux.FCNormA(:,:,k))); hlp.I2e(:,:,k) = - (2*pi/aux.beta) .* aux.I2e(:,:,k);
-    aux.I2f(:,:,k) = 2 .* sBF.wy .* real(aux.FCTangC(:,:,k) .* conj(aux.FCNormB(:,:,k))); hlp.I2f(:,:,k) = - (2*pi/aux.beta) .* aux.I2f(:,:,k);
-    
-    %I2 itself and sub-fields
-    aux.I2(:,:,k)      = - (2*pi/aux.beta) .* (aux.I2a(:,:,k) + aux.I2b(:,:,k) + aux.I2c(:,:,k) + aux.I2d(:,:,k) + aux.I2e(:,:,k) + aux.I2f(:,:,k));
-    sROProd.I2(:,:,k)  = aux.I2(:,:,k);
-    
-    sROProd.I2a(:,:,k) = - (2*pi/aux.beta) .* (aux.I2a(:,:,k));  sROProd.I2b(:,:,k) = - (2*pi/aux.beta) .* (aux.I2b(:,:,k));
-    sROProd.I2c(:,:,k) = - (2*pi/aux.beta) .* (aux.I2c(:,:,k));  sROProd.I2d(:,:,k) = - (2*pi/aux.beta) .* (aux.I2d(:,:,k));
-    sROProd.I2e(:,:,k) = - (2*pi/aux.beta) .* (aux.I2e(:,:,k));  sROProd.I2f(:,:,k) = - (2*pi/aux.beta) .* (aux.I2f(:,:,k));
-    
-    %Terms of I3
-    aux.I3a(:,:,k) = 2 .* sBF.ux .* real(aux.FCNormA(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I3b(:,:,k) = 2 .* sBF.uy .* real(aux.FCNormA(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    aux.I3c(:,:,k) = 2 .* sBF.vx .* real(aux.FCNormB(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I3d(:,:,k) = 2 .* sBF.vy .* real(aux.FCNormB(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    aux.I3e(:,:,k) = 2 .* sBF.wx .* real(aux.FCNormC(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I3f(:,:,k) = 2 .* sBF.wy .* real(aux.FCNormC(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    
-    %I3 itself
-    aux.I3(:,:,k)     = - (2*pi/aux.beta) .* (aux.I3a(:,:,k) + aux.I3b(:,:,k) + aux.I3c(:,:,k) + aux.I3d(:,:,k) + aux.I3e(:,:,k) + aux.I3f(:,:,k));
-    sROProd.I3(:,:,k) = aux.I3(:,:,k);
-    
-    %Terms of I4
-    aux.I4a(:,:,k) = 2 .* sBF.ux .* real(aux.FCTangA(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I4b(:,:,k) = 2 .* sBF.uy .* real(aux.FCTangA(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    aux.I4c(:,:,k) = 2 .* sBF.vx .* real(aux.FCTangB(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I4d(:,:,k) = 2 .* sBF.vy .* real(aux.FCTangB(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    aux.I4e(:,:,k) = 2 .* sBF.wx .* real(aux.FCTangC(:,:,k) .* conj(aux.FCTangA(:,:,k)));
-    aux.I4f(:,:,k) = 2 .* sBF.wy .* real(aux.FCTangC(:,:,k) .* conj(aux.FCTangB(:,:,k)));
-    
-    %I4 itself and sub-fields
-    aux.I4(:,:,k)     = - (2*pi/aux.beta) .* (aux.I4a(:,:,k) + aux.I4b(:,:,k) + aux.I4c(:,:,k) + aux.I4d(:,:,k) + aux.I4e(:,:,k) + aux.I4f(:,:,k));
-    sROProd.I4(:,:,k) = aux.I4(:,:,k);
-    
-    sROProd.I4a(:,:,k) = - (2*pi/aux.beta) .* (aux.I4a(:,:,k));  sROProd.I4b(:,:,k) = - (2*pi/aux.beta) .* (aux.I4b(:,:,k));
-    sROProd.I4c(:,:,k) = - (2*pi/aux.beta) .* (aux.I4c(:,:,k));  sROProd.I4d(:,:,k) = - (2*pi/aux.beta) .* (aux.I4d(:,:,k));
-    sROProd.I4e(:,:,k) = - (2*pi/aux.beta) .* (aux.I4e(:,:,k));  sROProd.I4f(:,:,k) = - (2*pi/aux.beta) .* (aux.I4f(:,:,k));
-    
-    %Fill with 0s inside the solid boundary 
-    %if rough.include == true && rough.type(1) == 1
-    %    sROProd.I1(rough.hPos+1:end,rough.xPos:end,k) = 0;   
-    %    sROProd.I2(rough.hPos+1:end,rough.xPos:end,k) = 0; 
-    %    sROProd.I3(rough.hPos+1:end,rough.xPos:end,k) = 0; 
-    %    sROProd.I4(rough.hPos+1:end,rough.xPos:end,k) = 0; 
-    %end
-                                            
-end
-
-%% Perform volume integral of Reynolds-Orr terms (along x and y)
-
-%Define integration limits
-lim.xMin     = 177.6149; %177.6149;
-lim.xMax     = 197.6149; %187.6149;
-lim.yHeight  = 6;
-
-if rough.include == true
-    lim.yMax = (rough.h + rough.deltaH) + lim.yHeight;
-else
-    lim.yMax = lim.yHeight;
-end
-
-lim.xMinPos = find(squeeze(sBF.X(1,1,:)) > lim.xMin,1,'first');
-lim.xMaxPos = find(squeeze(sBF.X(1,1,:)) > lim.xMax,1,'first');
-lim.yMaxPos = find(squeeze(sBF.Y(:,1,1)) < lim.yMax,1,'first');
-
-%Perfom volumetric integration (in x and y since the term is arranged
-%as already integrated in z)
-
-%Integrate production
-for k = 1:aux.Nh
-    aux.intVar = sROProd.P(:,:,k);
-    if rough.include == true
-        sROProd.intP(k)    = -trapz(sBF.Y(lim.yMaxPos:rough.hPos,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              aux.intVar(lim.yMaxPos:rough.hPos,lim.xMinPos:lim.xMaxPos),2));
-        sROProd.intAbsP(k) = -trapz(sBF.Y(lim.yMaxPos:rough.hPos,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              abs(aux.intVar(lim.yMaxPos:rough.hPos,lim.xMinPos:lim.xMaxPos)),2));
+    % ---- select spanwise-periodic modes (beta=0 MFD excluded: lambda_z -> Inf) ----
+    beta   = sPert.beta(:).';
+    bscale = max(1, max(abs(beta)));
+    if isempty(ro.modeIdx)
+        modeIdx = find(abs(beta) > 1e-8 * bscale);
     else
-        sROProd.intP(k)    = -trapz(sBF.Y(lim.yMaxPos:end,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              aux.intVar(lim.yMaxPos:end,lim.xMinPos:lim.xMaxPos),2));
-        sROProd.intAbsP(k) = -trapz(sBF.Y(lim.yMaxPos:end,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              abs(aux.intVar(lim.yMaxPos:end,lim.xMinPos:lim.xMaxPos)),2));
+        modeIdx = ro.modeIdx(:).';
+    end
+    if isempty(modeIdx)
+        error('reynoldsOrr:noModes', ...
+              'No spanwise-periodic modes (beta>0). betavec = [%s].', num2str(beta));
+    end
+    M = numel(modeIdx);
+
+    % ---- production field per mode ----
+    sRO.x = sBF.x;  sRO.y = sBF.y;
+    sRO.beta    = beta(modeIdx);
+    sRO.P       = zeros(Ny, Nx, M);
+    sRO.peakAmp = zeros(1, M);
+    % tangential/normal decomposition fields (ported from the 2021 script)
+    Idecomp = {'I1','I2','I3','I4', 'I2a','I2b','I2c','I2d','I2e','I2f', ...
+               'I4a','I4b','I4c','I4d','I4e','I4f'};
+    for i = 1:numel(Idecomp); sRO.(Idecomp{i}) = zeros(Ny,Nx,M); end
+
+    for m = 1:M
+        k   = modeIdx(m);
+        lam = 2*pi / beta(k);                        % spanwise wavelength lambda_z
+
+        % perturbation fields q_i(y,x) (full; DeHNSSo already combines mode + cc)
+        qu = reshape(sPert.u(k,:,:), [Ny, Nx]);
+        qv = reshape(sPert.v(k,:,:), [Ny, Nx]);
+        qw = reshape(sPert.w(k,:,:), [Ny, Nx]);
+
+        % z-averaged Reynolds stresses  < u'_i u'_j >_z = Re(q_i conj(q_j))  (no factor 2)
+        Ruu = real(qu .* conj(qu));
+        Ruv = real(qu .* conj(qv));                  % = Rvu
+        Rvv = real(qv .* conj(qv));
+        Rwu = real(qw .* conj(qu));                  % = Ruw
+        Rwv = real(qw .* conj(qv));                  % = Rvw
+
+        % production (z-integrated): P = -lambda_z * sum_ij <u'_i u'_j> dU_i/dx_j
+        sRO.P(:,:,m) = -lam .* ( Ruu.*sBF.ux + Ruv.*sBF.uy ...
+                               + Ruv.*sBF.vx + Rvv.*sBF.vy ...
+                               + Rwu.*sBF.wx + Rwv.*sBF.wy );
+        sRO.peakAmp(m) = max(abs(qu(:)));
+
+        % ---- tangential/normal decomposition I1..I4 (ported from the 2021
+        %      script; leading factor 2 dropped, as for P). Amplitude/phase form
+        %      matching the original: A/2 = |q|, so (A/2)cos(Phase)=Re(q), etc.
+        Au = 2*abs(qu);  Pu = angle(qu);
+        Av = 2*abs(qv);  Pv = angle(qv);
+        Aw = 2*abs(qw);  Pw = angle(qw);
+
+        moduleBF = sqrt(sBF.u.^2 + sBF.v.^2 + sBF.w.^2);
+        gamma1 = Au./2 .* sBF.u .* cos(Pu) + Av./2 .* sBF.v .* cos(Pv) + Aw./2 .* sBF.w .* cos(Pw);
+        gamma2 = -Au./2 .* sBF.u .* sin(Pu) - Av./2 .* sBF.v .* sin(Pv) - Aw./2 .* sBF.w .* sin(Pw);
+        gmag   = sqrt(gamma1.^2 + gamma2.^2);
+        xi     = gmag ./ moduleBF.^2;
+
+        % tangential vector
+        shapeTangA = gmag ./ moduleBF.^2 .* sBF.u;
+        shapeTangB = gmag ./ moduleBF.^2 .* sBF.v;
+        shapeTangC = gmag ./ moduleBF.^2 .* sBF.w;
+        phaseTang  = atan2(-gamma2, gamma1);
+        FCTangA = shapeTangA .* exp(1i*phaseTang);
+        FCTangB = shapeTangB .* exp(1i*phaseTang);
+        FCTangC = shapeTangC .* exp(1i*phaseTang);
+
+        % normal vector
+        phaseNormA = atan2(Au./2.*sin(Pu) - sBF.u.*xi.*sin(phaseTang), Au./2.*cos(Pu) - sBF.u.*xi.*cos(phaseTang));
+        phaseNormB = atan2(Av./2.*sin(Pv) - sBF.v.*xi.*sin(phaseTang), Av./2.*cos(Pv) - sBF.v.*xi.*cos(phaseTang));
+        phaseNormC = atan2(Aw./2.*sin(Pw) - sBF.w.*xi.*sin(phaseTang), Aw./2.*cos(Pw) - sBF.w.*xi.*cos(phaseTang));
+        shapeNormA = sqrt((Au./2).^2 + sBF.u.^2.*xi.^2 - 2.*sBF.u.*xi.*abs(Au./2).*cos(Pu - phaseTang));
+        shapeNormB = sqrt((Av./2).^2 + sBF.v.^2.*xi.^2 - 2.*sBF.v.*xi.*abs(Av./2).*cos(Pv - phaseTang));
+        shapeNormC = sqrt((Aw./2).^2 + sBF.w.^2.*xi.^2 - 2.*sBF.w.*xi.*abs(Aw./2).*cos(Pw - phaseTang));
+        FCNormA = shapeNormA .* exp(1i*phaseNormA);
+        FCNormB = shapeNormB .* exp(1i*phaseNormB);
+        FCNormC = shapeNormC .* exp(1i*phaseNormC);
+
+        % I1 (normal-normal)
+        I1a = sBF.ux.*real(FCNormA.*conj(FCNormA));
+        I1b = sBF.uy.*real(FCNormA.*conj(FCNormB));
+        I1c = sBF.vx.*real(FCNormB.*conj(FCNormA));
+        I1d = sBF.vy.*real(FCNormB.*conj(FCNormB));
+        I1e = sBF.wx.*real(FCNormC.*conj(FCNormA));
+        I1f = sBF.wy.*real(FCNormC.*conj(FCNormB));
+        sRO.I1(:,:,m) = -lam .* (I1a+I1b+I1c+I1d+I1e+I1f);
+
+        % I2 (tangential-normal)
+        I2a = sBF.ux.*real(FCTangA.*conj(FCNormA));
+        I2b = sBF.uy.*real(FCTangA.*conj(FCNormB));
+        I2c = sBF.vx.*real(FCTangB.*conj(FCNormA));
+        I2d = sBF.vy.*real(FCTangB.*conj(FCNormB));
+        I2e = sBF.wx.*real(FCTangC.*conj(FCNormA));
+        I2f = sBF.wy.*real(FCTangC.*conj(FCNormB));
+        sRO.I2(:,:,m)  = -lam .* (I2a+I2b+I2c+I2d+I2e+I2f);
+        sRO.I2a(:,:,m) = -lam.*I2a;  sRO.I2b(:,:,m) = -lam.*I2b;  sRO.I2c(:,:,m) = -lam.*I2c;
+        sRO.I2d(:,:,m) = -lam.*I2d;  sRO.I2e(:,:,m) = -lam.*I2e;  sRO.I2f(:,:,m) = -lam.*I2f;
+
+        % I3 (normal-tangential)
+        I3a = sBF.ux.*real(FCNormA.*conj(FCTangA));
+        I3b = sBF.uy.*real(FCNormA.*conj(FCTangB));
+        I3c = sBF.vx.*real(FCNormB.*conj(FCTangA));
+        I3d = sBF.vy.*real(FCNormB.*conj(FCTangB));
+        I3e = sBF.wx.*real(FCNormC.*conj(FCTangA));
+        I3f = sBF.wy.*real(FCNormC.*conj(FCTangB));
+        sRO.I3(:,:,m) = -lam .* (I3a+I3b+I3c+I3d+I3e+I3f);
+
+        % I4 (tangential-tangential)
+        I4a = sBF.ux.*real(FCTangA.*conj(FCTangA));
+        I4b = sBF.uy.*real(FCTangA.*conj(FCTangB));
+        I4c = sBF.vx.*real(FCTangB.*conj(FCTangA));
+        I4d = sBF.vy.*real(FCTangB.*conj(FCTangB));
+        I4e = sBF.wx.*real(FCTangC.*conj(FCTangA));
+        I4f = sBF.wy.*real(FCTangC.*conj(FCTangB));
+        sRO.I4(:,:,m)  = -lam .* (I4a+I4b+I4c+I4d+I4e+I4f);
+        sRO.I4a(:,:,m) = -lam.*I4a;  sRO.I4b(:,:,m) = -lam.*I4b;  sRO.I4c(:,:,m) = -lam.*I4c;
+        sRO.I4d(:,:,m) = -lam.*I4d;  sRO.I4e(:,:,m) = -lam.*I4e;  sRO.I4f(:,:,m) = -lam.*I4f;
+    end
+
+    % Wall row (no-slip -> |V_base|=0 -> 0/0 in the tang/normal decomposition).
+    % The 2021 script used cell-centre data with no wall row; here the wall is a
+    % grid row, so zero it (the perturbation, hence its production, vanishes there).
+    for i = 1:numel(Idecomp); sRO.(Idecomp{i})(end,:,:) = 0; end
+
+    fprintf('reynoldsOrr: %d mode(s) [beta = %s]\n', M, num2str(sRO.beta, '%.4g '));
+
+    % ---- volume integral of P over the (optional) window ----
+    xrow  = sBF.x(1, :).';           % Nx x 1  (x varies along columns)
+    ycol  = sBF.y(:, 1);             % Ny x 1  (y varies down rows)
+    xmask = true(Nx,1);  if ~isempty(ro.xLim), xmask = xrow>=min(ro.xLim) & xrow<=max(ro.xLim); end
+    ymask = true(Ny,1);  if ~isempty(ro.yLim), ymask = ycol>=min(ro.yLim) & ycol<=max(ro.yLim); end
+
+    sRO.intP    = zeros(1, M);
+    sRO.intAbsP = zeros(1, M);
+    if nnz(xmask) < 2 || nnz(ymask) < 2
+        warning('reynoldsOrr:window', ...
+                'Integration window has <2 points in x or y; integrals left as 0.');
+        return;
+    end
+    xi       = xrow(xmask);
+    [yi, yo] = sort(ycol(ymask), 'ascend');          % ascending y so dy > 0 (physical)
+    for m = 1:M
+        Pm = sRO.P(ymask, xmask, m);
+        Pm = Pm(yo, :);                              % rows -> ascending y
+        sRO.intP(m)    = trapz(yi, trapz(xi, Pm,      2));
+        sRO.intAbsP(m) = trapz(yi, trapz(xi, abs(Pm), 2));
     end
 end
-
-%Integrate perturbation kinetic energy
-for k = 1:aux.Nh
-    if rough.include == true
-        aux.intTot(k)    = -trapz(sBF.Y(lim.yMaxPos:rough.hPos,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*aux.shapeTot(lim.yMaxPos:rough.hPos,lim.xMinPos:lim.xMaxPos,k).^2,2)); 
-        aux.intTang(k)   = -trapz(sBF.Y(lim.yMaxPos:rough.hPos,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*hlp.shapeTang(lim.yMaxPos:rough.hPos,lim.xMinPos:lim.xMaxPos,k).^2,2));
-        aux.intNorm(k)   = -trapz(sBF.Y(lim.yMaxPos:rough.hPos,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*hlp.shapeNorm(lim.yMaxPos:rough.hPos,lim.xMinPos:lim.xMaxPos,k).^2,2));
-    else
-        aux.intTot(k)    = -trapz(sBF.Y(lim.yMaxPos:end,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*aux.shapeTot(lim.yMaxPos:end,lim.xMinPos:lim.xMaxPos,k).^2,2));
-        aux.intTang(k)   = -trapz(sBF.Y(lim.yMaxPos:end,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*hlp.shapeTang(lim.yMaxPos:end,lim.xMinPos:lim.xMaxPos,k).^2,2));
-        aux.intNorm(k)   = -trapz(sBF.Y(lim.yMaxPos:end,1,1),trapz(squeeze(sBF.X(1,1,lim.xMinPos:lim.xMaxPos)),...
-                              0.5*hlp.shapeNorm(lim.yMaxPos:end,lim.xMinPos:lim.xMaxPos,k).^2,2));
-    end
-end
-
-%% Plot results
-
-% %Limits to plot 
-% minX       = 175.62;
-% maxX       = 190.62;
-% maxY       = 4; 
-% 
-% pathPng = ['InputsOutputs/pngFiles/' generation '/' refinement '/' test '/CFI'];
-% 
-% if mainFig == true
-%     reynoldsOrrProductionPlotterFun(sBF,sROProd,hlp,rough,pathPng,minX,maxX,maxY,refinement);
-% end
-% 
-% clear aux hlp

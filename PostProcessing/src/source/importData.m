@@ -19,7 +19,9 @@ function [sBF, sPert, inp] = importData(inp)
 %                          loadBF: computed here from u,v,w via differentiateField)
 %
 % sPert (loadFields only) carries all perturbation modes:
-%   sPert.u,v,w,p          (Nmode x Ny x Nx) complex amplitude functions
+%   sPert.u,v,w,p          (Nmode x Ny x Nx) complex, FULL amplitude-scaled fields
+%                          (A .* shape) — not normalized; use directly.
+%   sPert.A                (Nmode x Nx) peak-amplitude curve (max_y|u'|), diagnostic
 %   sPert.omega, sPert.beta, sPert.alpha   (if present in source)
 %
 % Required inp fields:
@@ -265,18 +267,26 @@ function [sBF, sPert, inp] = importFromFields(inp)
     sBF.vx = G.dxV;  sBF.vy = G.dyV;
     sBF.wx = G.dxW;  sBF.wy = G.dyW;
 
-    % --- perturbation: all modes, mode selection deferred to downstream ---
-    sPert.u = R.u;   % (Nmode x Ny x Nx), complex
-    sPert.v = R.v;
-    sPert.w = R.w;
-    sPert.p = R.p;
+    % --- perturbation: all modes (mode selection deferred downstream) ---
+    % Store the FULL, amplitude-scaled fields (physical = A .* shape), so u/v/w/p
+    % ARE the perturbation and every downstream script uses them directly (no
+    % shape/A split). StabRes.u/v/w/p are peak-normalized shapes and R.A the modal
+    % amplitude (Nmode x Nx); we fold A in here. A is kept as the peak-amplitude
+    % curve (== max_y|u'|), a diagnostic only — do NOT multiply u/v/w by it again.
+    if isfield(R, 'A')
+        Am = reshape(R.A, size(R.A,1), 1, size(R.A,2));   % Nmode x 1 x Nx (broadcast over y)
+        sPert.u = Am .* R.u;   % (Nmode x Ny x Nx) complex
+        sPert.v = Am .* R.v;
+        sPert.w = Am .* R.w;
+        sPert.p = Am .* R.p;
+        sPert.A = R.A;
+    else
+        % No stored amplitude: assume u/v/w/p are already the physical fields.
+        sPert.u = R.u;  sPert.v = R.v;  sPert.w = R.w;  sPert.p = R.p;
+    end
     if isfield(R, 'omegavec'), sPert.omega = R.omegavec; end
     if isfield(R, 'betavec'),  sPert.beta  = R.betavec;  end
     if isfield(R, 'alpha'),    sPert.alpha = R.alpha;    end
-    % modal amplitude A(x) per mode (Nmode x Nx). u/v/w/p are peak-normalized
-    % shape functions, so the physical perturbation is A.*shape and the
-    % streamwise amplitude max_y|u'| equals A.
-    if isfield(R, 'A'),        sPert.A     = R.A;        end
     % reference scales (for normalizing plot axes): u_inf, length scale, Re
     if isfield(G, 'Uref'),     sPert.uref  = G.Uref;     end
     if isfield(G, 'lref'),     sPert.lref  = G.lref;     end
