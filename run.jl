@@ -1,73 +1,176 @@
 #!/usr/bin/env julia
 #
-# airPower orchestrator
+# airPower — top-level dispatcher
+#
+# Routes a stage command to the right runner. The stages are mixed-language:
+# PreProcessing is Julia; instAbility and PostProcessing are MATLAB (launched via
+# `matlab -batch` under the hood). This dispatcher shells out to each stage so
+# they stay isolated in their own process.
 #
 # Usage:
-#   julia run.jl TunnelToCurvedPlate all          # full pipeline: tunnel → curved plate
-#   julia run.jl TunnelToCurvedPlate meshTunnel   # mesh tunnel only
-#   julia run.jl TunnelToCurvedPlate runTunnel    # solve tunnel only
-#   julia run.jl TunnelToCurvedPlate map          # map tunnel → airfoil BCs
-#   julia run.jl TunnelToCurvedPlate runAirfoil   # solve airfoil only
-#   julia run.jl DirectFlatPlate all              # direct flat-plate computation
-#   julia run.jl DirectFlatPlate viz              # visualization only
+#   julia run.jl PreProcessing <module> <action>          # e.g. DirectFlatPlate all
+#   julia run.jl instAbility   DeHNSSo <mesh|run> <case>  # (wired in a later phase)
+#   julia run.jl PostProcessing <task>                    # importData | reynoldsOrrProdTerms
+#
+# MATLAB executable: `matlab` on PATH by default; override with the
+# AIRPOWER_MATLAB environment variable (e.g. the full .app path on macOS).
 #
 
 const ROOT = @__DIR__
+include(joinpath(ROOT, "inputs.jl"))   # `inp` — the single source of truth
 
-# Central inputs (single source of truth for all parameters)
-include(joinpath(ROOT, "inputs.jl"))
+function usage()
+    println("""
+airPower dispatcher
 
-# Include all source files
-include(joinpath(ROOT, "PreProcessing", "src", "source", "backend.jl"))
+  julia run.jl PreProcessing <module> <action>
+      module  : DirectFlatPlate | TunnelToCurvedPlate
+      action  : all | clean | prep | viz | ...
+  julia run.jl instAbility DeHNSSo <mesh|run> <case>
+      mesh    : PreProcessing midPlane -> gridgen -> StabGrid
+      run     : DeHNSSo caller -> StabRes (-> PostProcessing/io/input/<encoded>.mat)
+      case    : sweptwing_flat
+  julia run.jl PostProcessing <task>
+      task    : importData | reynoldsOrrProdTerms
+""")
+end
 
-# Auxiliary functions (must come before source files that use them)
-include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "leastSquares.jl"))
-include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "falknerSkan.jl"))
+# --- MATLAB launcher (matlab from PATH; override with AIRPOWER_MATLAB) ---
+function matlab_batch(statement)
+    matlab = get(ENV, "AIRPOWER_MATLAB", "matlab")
+    run(`$matlab -batch $statement`)
+end
 
-# Plotting & validation (must come before modules that reference plot functions)
-using Plots, DelimitedFiles, Glob, Printf, LaTeXStrings, Statistics
-default(fontfamily = "Computer Modern")
-const PV_DIR = joinpath(ROOT, "PreProcessing", "src", "plottingAndValidation")
-include(joinpath(PV_DIR, "residuals.jl"))
-include(joinpath(PV_DIR, "fields.jl"))
-include(joinpath(PV_DIR, "profiles.jl"))
-include(joinpath(PV_DIR, "wallgeometry.jl"))
-include(joinpath(PV_DIR, "wallquantities.jl"))
-include(joinpath(PV_DIR, "blmetrics.jl"))
-include(joinpath(PV_DIR, "experimentalvalidation.jl"))
-include(joinpath(PV_DIR, "dfpvalidation.jl"))
-include(joinpath(PV_DIR, "iblTTCPComparison.jl"))
+# --- serialize a Julia value to a MATLAB literal ---
+mat_lit(x::AbstractString) = "'" * x * "'"
+mat_lit(x::Bool)           = x ? "true" : "false"
+mat_lit(x::Real)           = string(x)
+mat_lit(x::AbstractVector) = isempty(x) ? "[]" : "[" * join(string.(x), " ") * "]"
 
-# External-to-scaling preprocessing
-include(joinpath(ROOT, "PreProcessing", "src", "source", "externalToScaling.jl"))
+# --- PreProcessing: shell to the Julia orchestrator in its own process ---
+function run_preprocessing(args)
+    script = joinpath(ROOT, "PreProcessing", "run.jl")
+    @info "airPower ▶ PreProcessing" args = args
+    run(`$(Base.julia_cmd()) $script $args`)
+end
 
-# BL-metrics computation (also run standalone in postAirfoil); included so the
-# viz step can build the freestream-method comparison figure in-memory, with no
-# intermediate BLQuantities_compare.csv written to disk.
-include(joinpath(ROOT, "PreProcessing", "src", "source", "blMetrics.jl"))
+# --- instAbility / DeHNSSo: mesh (gridgen) and run (solver) ---
+function run_instability(args)
+    length(args) >= 3 ||
+        error("usage: julia run.jl instAbility DeHNSSo <mesh|run> <case>")
+    modul, sub, case_ = args[1], args[2], args[3]
+    modul == "DeHNSSo" || error("instAbility: only 'DeHNSSo' is wired (got '$modul').")
+    dehnsso = joinpath(ROOT, "instAbility", "DeHNSSo")
+    if sub == "mesh"
+        dehnsso_mesh(dehnsso, case_)
+    elseif sub == "run"
+        dehnsso_run(dehnsso, case_)
+    else
+        error("instAbility DeHNSSo: subcommand must be 'mesh' or 'run' (got '$sub').")
+    end
+end
 
-# Third-party boundary-layer (IBL) solver bridge (glue to external/ solver)
-include(joinpath(ROOT, "PreProcessing", "src", "thirdParty", "bridge", "runIBL.jl"))
+# mesh: copy PreProcessing midPlane -> base-flow csv, then run gridgen -> StabGrid
+function dehnsso_mesh(dehnsso, case_)
+    case_ == "sweptwing_flat" ||
+        error("mesh: only 'sweptwing_flat' is wired for now (got '$case_').")
+    src = joinpath(ROOT, "PreProcessing", "modules", "directFlatPlateModule",
+                   "postProcessing", "midPlane.csv")
+    isfile(src) ||
+        error("mesh: source midPlane not found:\n  $src\n(run PreProcessing DirectFlatPlate first)")
+    dst = joinpath(dehnsso, "baseflow", "output", "benchmark", "bf_$(case_).csv")
+    @info "airPower ▶ instAbility DeHNSSo mesh" src dst
+    cp(src, dst; force = true)
+    gridgen = joinpath(dehnsso, "gridgen", "benchmark", "$(case_).m")
+    isfile(gridgen) || error("mesh: gridgen script not found: $gridgen")
+    matlab_batch("run('$gridgen')")
+end
 
-# Wall-modulation scaling: resolve a bump's {A, xCenter} from {Re_k, A/δ*} on the
-# IBL baseline (DFP). Included after runIBL (uses run_ibl_solver) and before the
-# modules (backend/directFlatPlate use dfp_wm at run time).
-include(joinpath(ROOT, "PreProcessing", "src", "source", "wallModulationScaling.jl"))
+# run: run the solver caller, then save StabRes+StabGrid for PostProcessing.
+# The filename encodes the run's major inputs — <case>_<lin|nl>_N<N>_lz<λz>mm_A<A0> —
+# built MATLAB-side (Stab/Opt live in the caller, not inputs.jl). In the name,
+# '.'->'d' and '-'->'m' (e.g. 7.5->7d5, 5e-05->5em05) to avoid dots/dashes.
+function dehnsso_run(dehnsso, case_)
+    caller = joinpath(dehnsso, "callers", "benchmark", "$(case_).m")
+    isfile(caller) || error("run: caller not found: $caller")
+    fieldsdir = joinpath(ROOT, "PostProcessing", "io", "input")
+    mkpath(fieldsdir)
+    @info "airPower ▶ instAbility DeHNSSo run" caller fieldsdir
+    stmt = string(
+        "run('$caller'); ",
+        "lz = 2*pi*StabGrid.lref/Stab.beta_0*1e3; ",
+        "lin = 'nl'; if strcmpi(Opt.linear,'on'), lin = 'lin'; end; ",
+        "nm = sprintf('$(case_)_%s_N%d_lz%.4gmm_A%.3g', lin, Stab.N, lz, Stab.A0_fund); ",
+        "nm = strrep(strrep(nm, '.', 'd'), '-', 'm'); ",
+        "out = fullfile('$fieldsdir', [nm '.mat']); ",
+        "save(out, 'StabRes', 'StabGrid'); ",
+        "fprintf('\\n[airPower] saved -> %s\\n', out)")
+    matlab_batch(stmt)
+end
 
-# Module definitions and pipeline
-include(joinpath(ROOT, "PreProcessing", "src", "source", "pipeline.jl"))
-include(joinpath(ROOT, "PreProcessing", "src", "source", "tunnelToCurvedPlate.jl"))
-include(joinpath(ROOT, "PreProcessing", "src", "source", "directFlatPlate.jl"))
+# write the PostProcessing block of inputs.jl to the generated MATLAB config
+function write_pp_config(pp, task)
+    gen = joinpath(ROOT, "PostProcessing", "inputs_gen.m")
+    open(gen, "w") do io
+        println(io, "% AUTO-GENERATED by airPower dispatcher (run.jl) from inputs.jl — do not edit")
+        println(io, "inp.airPowerRoot   = $(mat_lit(ROOT));")
+        println(io, "inp.task           = $(mat_lit(task));")
+        println(io, "inp.loadMode       = $(mat_lit(pp.loadMode));")
+        println(io, "inp.caseType       = $(mat_lit(pp.caseType));")
+        println(io, "inp.fieldsFile     = $(mat_lit(pp.fieldsFile));")
+        println(io, "inp.loadAnalysis   = $(mat_lit(pp.loadAnalysis));")
+        println(io, "inp.modeIdx        = $(mat_lit(pp.modeIdx));")
+        println(io, "inp.validation     = $(mat_lit(pp.validation));")
+        # pulled from the PreProcessing blocks (no PostProcessing duplication):
+        println(io, "inp.valGen         = $(mat_lit(inp.VAL.Gen));")
+        println(io, "inp.valCase        = $(mat_lit(inp.VAL.Case));")
+        println(io, "inp.xInlet         = $(mat_lit(inp.DFP.xInlet));")
+        println(io, "inp.ro.xLim        = $(mat_lit(pp.ro.xLim));")
+        println(io, "inp.ro.yLim        = $(mat_lit(pp.ro.yLim));")
+        println(io, "inp.ro.bufferFrac  = $(mat_lit(pp.ro.bufferFrac));")
+    end
+    return gen
+end
 
-# --- Main ---
-# Only run automatically when called from the command line (julia run.jl ...),
-# not when loaded interactively via include("run.jl") in the REPL.
-if !isempty(ARGS)
-    module_name = ARGS[1]
-    action      = length(ARGS) >= 2 ? ARGS[2] : "all"
+# --- PostProcessing: export inp.PostProcessing -> generated MATLAB config, run.m ---
+# Special task `config` regenerates the MATLAB config from inputs.jl WITHOUT running
+# MATLAB — used by run.m to refresh a stale config in the direct-MATLAB workflow.
+function run_postprocessing(args)
+    isempty(args) && error("PostProcessing needs a task: " *
+                           "julia run.jl PostProcessing <importData|reynoldsOrrProdTerms|config>")
+    pp  = inp.PostProcessing
+    sub = args[1]
+    if sub == "config"
+        gen = write_pp_config(pp, pp.task)
+        @info "airPower ▶ PostProcessing config regenerated from inputs.jl" task = pp.task gen
+        return
+    end
+    gen = write_pp_config(pp, sub)
+    @info "airPower ▶ PostProcessing (MATLAB)" task = sub gen
+    # AIRPOWER_PP_DISPATCH signals run.m that this config is authoritative (carries
+    # the CLI task) — so run.m loads it as-is instead of re-syncing from inputs.jl.
+    stmt   = "run('$(joinpath(ROOT, "PostProcessing", "run.m"))')"
+    matlab = get(ENV, "AIRPOWER_MATLAB", "matlab")
+    run(addenv(`$matlab -batch $stmt`, "AIRPOWER_PP_DISPATCH" => "1"))
+end
 
-    @info "airPower orchestrator" mod=module_name action=action
-    run_module(module_name, action; root=ROOT)
+# --- main ---
+if isempty(ARGS)
+    usage()
+    exit(0)
+end
+
+stage = ARGS[1]
+rest  = ARGS[2:end]
+
+if stage == "PreProcessing"
+    run_preprocessing(rest)
+elseif stage == "instAbility"
+    run_instability(rest)
+elseif stage == "PostProcessing"
+    run_postprocessing(rest)
 else
-    @info "airPower loaded. Usage: run_module(\"TunnelToCurvedPlate\", \"viz\"; root=ROOT)"
+    @error "Unknown stage" stage
+    usage()
+    exit(1)
 end

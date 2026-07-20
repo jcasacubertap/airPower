@@ -60,10 +60,39 @@ fprintf('\n================= AmplitudeFinisher =================\n');
 fprintf('  matched x/c          : %s\n', num2str(piv.xc(sel)));
 fprintf('  spanwise modes N     : %d\n', result.N);
 fprintf('  matched A0_fund      : %.6g\n', result.A0);
-fprintf('  (best swept A0       : %.6g,  J = %.4g)\n', result.A0sweptBest, result.J);
+fprintf('  match residual J     : %.4g   (0 = perfect fit)\n', result.J);
 fprintf('=====================================================\n');
 
-save(fullfile(here, 'AmplitudeFinisher_match.mat'), 'result', 'piv', 'sel', 'in');
+% --- Save all relevant information and fields (metadata + available fields) ---
+% Bundles the match outcome (result: A0, sweep, best-swept w'), the full input
+% config (in), the PIV target (piv) and matched stations (sel), the base-flow
+% grid actually used (StabGrid: base flow + lref/Uref, truncated to the window),
+% and a headline `meta` summary. NOTE: there is no full StabRes here — result.A0
+% is the interpolated ratio->1 crossing and no solve is run at it; result.hns is
+% the extracted w' at A0sweptBest. To post-process the matched solution, run the
+% DeHNSSo caller (sweptwing_flat.m) with Stab.A0_fund = result.A0 on the full
+% domain (verbatim, no /2).
+meta = struct( ...
+    'A0_fund',       result.A0, ...          % <-- plug into caller line 28 VERBATIM (no /2)
+    'J',             result.J, ...           % match residual (0 = perfect fit over the window)
+    'N',             result.N, ...
+    'xcWindow',      in.match.xcWindow, ...
+    'xcMatched',     piv.xc(sel), ...
+    'lambda_z',      in.Stab.lambda_z, ...
+    'rmsFactor',     in.match.rmsFactor, ...  % convention: sqrt(2) (mode |a|=A/2 -> z-RMS)
+    'xOffset',       in.match.xOffset, ...
+    'Uref',          StabGrid.Uref, ...
+    'lref',          StabGrid.lref, ...
+    'gen',           gen, ...
+    'caseId',        caseId, ...
+    'savedOn',       char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')), ...
+    'note',          'A0_fund = result.A0 -> caller line 28 verbatim (no /2); rmsFactor=sqrt(2) convention');
+
+matFile = fullfile(here, 'AmplitudeFinisher_match.mat');
+save(matFile, 'result', 'in', 'piv', 'sel', 'StabGrid', 'meta', '-v7.3');
+fprintf('  saved: %s\n', matFile);
+fprintf('  -> A0_fund = %.6g  (caller line 28, verbatim)\n', meta.A0_fund);
+
 plot_match(result, piv, sel, here);
 
 

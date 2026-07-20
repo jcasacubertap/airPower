@@ -6,7 +6,7 @@ function [sBF, sPert, inp] = importData(inp)
 % Dispatches on inp.loadMode:
 %   'loadBF'     -> base flow only, from a PreProcessing case's midPlane data.
 %                   sPert is returned empty ([]).
-%   'loadFields' -> base flow AND perturbation, from io/fields/<inp.fieldsFile>.
+%   'loadFields' -> base flow AND perturbation, from io/input/<inp.fieldsFile>.
 %                   The base flow has been interpolated onto a stability grid,
 %                   so it differs from the midPlane base flow of 'loadBF'.
 %
@@ -19,16 +19,16 @@ function [sBF, sPert, inp] = importData(inp)
 %                          loadBF: computed here from u,v,w via differentiateField)
 %
 % sPert (loadFields only) carries all perturbation modes:
-%   sPert.u,v,w,p          (Nmode x Ny x Nx) complex, FULL amplitude-scaled fields
-%                          (A .* shape) — not normalized; use directly.
-%   sPert.A                (Nmode x Nx) peak-amplitude curve (max_y|u'|), diagnostic
+%   sPert.u,v,w,p          (Nmode x Ny x Nx) complex, PHYSICAL PEAK fields
+%                          (A .* shape, A = max|u'|) — use directly; RMS = |.|/sqrt(2).
+%   sPert.A                (Nmode x Nx) raw StabRes.A (= max|u'| peak), diagnostic
 %   sPert.omega, sPert.beta, sPert.alpha   (if present in source)
 %
 % Required inp fields:
 %   inp.airPowerRoot   absolute path to airPower
 %   inp.loadMode       'loadBF' (default) or 'loadFields'
 %   inp.caseType       'DFP' or 'TTCP'        (loadBF)
-%   inp.fieldsFile     name of .mat in io/fields (loadFields)
+%   inp.fieldsFile     name of .mat in io/input (loadFields)
 
     if ~isfield(inp, 'loadMode') || isempty(inp.loadMode)
         inp.loadMode = 'loadBF';
@@ -217,7 +217,7 @@ function [sBF, inp] = importFromPreProc(inp)
     end
 end
 
-% --- loadFields: read base flow + perturbation from an io/fields/*.mat ---
+% --- loadFields: read base flow + perturbation from an io/input/*.mat ---
 % The file is expected to hold (Casacuberta2022.mat-style):
 %   StabGrid : base flow on the stability grid
 %              .x (1 x Nx), .y (1 x Ny), .U/.V/.W and gradients .dxU/.dyU/...
@@ -230,7 +230,7 @@ function [sBF, sPert, inp] = importFromFields(inp)
               'inp.fieldsFile is required for loadMode=''loadFields''.');
     end
 
-    matPath = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'fields', inp.fieldsFile);
+    matPath = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'input', inp.fieldsFile);
     if ~isfile(matPath)
         error('importData:fieldsNotFound', 'Fields file not found: %s', matPath);
     end
@@ -268,18 +268,21 @@ function [sBF, sPert, inp] = importFromFields(inp)
     sBF.wx = G.dxW;  sBF.wy = G.dyW;
 
     % --- perturbation: all modes (mode selection deferred downstream) ---
-    % Store the FULL, amplitude-scaled fields (physical = A .* shape), so u/v/w/p
-    % ARE the perturbation and every downstream script uses them directly (no
-    % shape/A split). StabRes.u/v/w/p are peak-normalized shapes and R.A the modal
-    % amplitude (Nmode x Nx); we fold A in here. A is kept as the peak-amplitude
-    % curve (== max_y|u'|), a diagnostic only — do NOT multiply u/v/w by it again.
+    % Store the PHYSICAL PEAK fields so u/v/w/p ARE the perturbation and every
+    % downstream script uses them directly (no shape/A split). StabRes.u/v/w/p are
+    % peak-normalized shapes and R.A the modal amplitude (Nmode x Nx). Per DeHNSSo
+    % (postprocess.m / plot_amplitudes.m), StabRes.A = 2|u_max| = max|u'|, i.e. the
+    % PEAK of the physical real perturbation  u'(z) = 2|a|cos(bz) = A*shape*cos.
+    % So we fold in the FULL A (the peak) and the spanwise RMS is |sPert|/sqrt(2)
+    % (DeHNSSo's own 'urms' metric = A/sqrt(2)). The complex Fourier coefficient is
+    % A/2*shape; do NOT confuse it with the peak.
     if isfield(R, 'A')
-        Am = reshape(R.A, size(R.A,1), 1, size(R.A,2));   % Nmode x 1 x Nx (broadcast over y)
-        sPert.u = Am .* R.u;   % (Nmode x Ny x Nx) complex
+        Am = reshape(R.A, size(R.A,1), 1, size(R.A,2));   % Nmode x 1 x Nx (full A = peak, broadcast over y)
+        sPert.u = Am .* R.u;   % (Nmode x Ny x Nx) complex, physical peak field
         sPert.v = Am .* R.v;
         sPert.w = Am .* R.w;
         sPert.p = Am .* R.p;
-        sPert.A = R.A;
+        sPert.A = R.A;         % raw StabRes.A (= max|u'| peak); diagnostic
     else
         % No stored amplitude: assume u/v/w/p are already the physical fields.
         sPert.u = R.u;  sPert.v = R.v;  sPert.w = R.w;  sPert.p = R.p;

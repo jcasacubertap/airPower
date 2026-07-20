@@ -24,8 +24,8 @@ Stab.beta_0  = 2*pi * StabGrid.lref / 7.5e-3;   % lambda = 7.5 mm
 % =========================================================================
 Stab.IC       = 'ILST';      % 'ILST' | 'LOAD' (needs Stab.ICfile)
 Stab.phaseRef = 'umax';      % 'pwall' (TS) | 'umax' (CFI)
-Opt.linear    = 'on';       % 'on' linear (1 iter) | 'off' nonlinear
-Stab.A0_fund  = 1.0e-4/2;    % fundamental amplitude
+Opt.linear    = 'on';        % 'on' linear (1 iter) | 'off' nonlinear
+Stab.A0_fund  = 0.7524e-4/2;    % fundamental amplitude
 
 % =========================================================================
 %% Boundary conditions
@@ -94,3 +94,9 @@ if strcmpi(Opt.plot, 'on')
     end
     plot_stability(StabGrid, StabRes, Opt);
 end
+
+% =========================================================================
+%% Save results in the DeHNSSo folder
+% =========================================================================
+save(fullfile(rootdir, 'sweptwing_flat_output.mat'), 'StabRes', 'StabGrid');
+fprintf('  saved -> %s\n', fullfile(rootdir, 'sweptwing_flat_output.mat'));

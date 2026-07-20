@@ -112,7 +112,14 @@ switch lower(in.machine)
 end
 
 %% -- Matching details --
-in.match.rmsFactor = 1/sqrt(2);        % mode-amplitude -> spanwise RMS convention
+% extractWprimeHNS builds the mode amplitude as |shape|*(A/2) (the complex Fourier
+% coefficient |a|), then multiplies by rmsFactor to get the spanwise (z) RMS.
+% DeHNSSo's A = 2|u_max| = max|u'| (the PEAK), so the physical field is
+% u'(z) = 2|a|cos(bz), peak = A*shape, and z-RMS = peak/sqrt(2) = A*shape/sqrt(2).
+% From the base |a| = A/2, that RMS is (A/2)*sqrt(2). Hence rmsFactor = sqrt(2)
+% (NOT 1/sqrt(2): using 1/sqrt(2) double-counts the halving in A/2 and gives half
+% the true RMS, which over-scales the matched A0 by 2x).
+in.match.rmsFactor = sqrt(2);          % |a| (=A/2) -> spanwise RMS = sqrt(2)*|a| = A/sqrt(2)
 % Streamwise frame: the OpenFOAM/StabGrid x is measured from the INLET, while
 % the PIV x/c maps to arc-length S from the LE. They differ by xInlet, exactly
 % as in airPower's DFP validation (dfpvalidation.jl: x_DFP = S - xInlet, i.e.

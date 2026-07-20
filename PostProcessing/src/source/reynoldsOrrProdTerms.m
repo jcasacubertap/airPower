@@ -9,13 +9,13 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 %   P = - lambda_z * sum_{i,j}  < u'_i u'_j >_z  dU_i/dx_j ,
 %
 %   i in {u,v,w},  j in {x,y}   (the base flow is spanwise-homogeneous, d/dz=0),
-%   < u'_i u'_j >_z = Re( q_i conj(q_j) )     (see NORMALIZATION note below),
+%   < u'_i u'_j >_z = (1/2) Re( q_i conj(q_j) )   (see NORMALIZATION note below),
 %   lambda_z = 2*pi/beta                       (from integrating 1 dz over a period).
 %
 % Full 3-D: the crossflow terms w', dW/dx, dW/dy are included. (The 2021
 % original zeroed them for a 2-D TS case — see reynoldsOrrProdTermsFun_legacy2021.m.)
 % Also returns the tangential/normal decomposition I1..I4 (I1+I2+I3+I4 = P),
-% ported exactly from that script apart from the factor 2 (see NORMALIZATION).
+% ported exactly from that script (see NORMALIZATION).
 %
 % INPUTS (from importData, loadMode='loadFields'):
 %   sBF   base flow on the stability grid, Ny x Nx, rows free-stream(1,:)->wall(end,:):
@@ -52,21 +52,24 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
     [Ny, Nx] = size(sBF.u);
 
     % ---- options (inp.ro overrides these defaults) ----
-    ro = struct('modeIdx', [], 'xLim', [], 'yLim', []);
+    ro = struct('xLim', [], 'yLim', []);
     if isfield(inp, 'ro') && ~isempty(inp.ro)
         f = fieldnames(inp.ro);
         for i = 1:numel(f)
             if isfield(ro, f{i}), ro.(f{i}) = inp.ro.(f{i}); end
         end
     end
+    % mode selection is a general plotting input (inp.modeIdx), not ro-specific
+    modeSel = [];
+    if isfield(inp, 'modeIdx'); modeSel = inp.modeIdx; end
 
     % ---- select spanwise-periodic modes (beta=0 MFD excluded: lambda_z -> Inf) ----
     beta   = sPert.beta(:).';
     bscale = max(1, max(abs(beta)));
-    if isempty(ro.modeIdx)
+    if isempty(modeSel)
         modeIdx = find(abs(beta) > 1e-8 * bscale);
     else
-        modeIdx = ro.modeIdx(:).';
+        modeIdx = modeSel(:).';
     end
     if isempty(modeIdx)
         error('reynoldsOrr:noModes', ...
@@ -88,12 +91,15 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
         k   = modeIdx(m);
         lam = 2*pi / beta(k);                        % spanwise wavelength lambda_z
 
-        % perturbation fields q_i(y,x) (full; DeHNSSo already combines mode + cc)
+        % perturbation fields q_i(y,x): the PHYSICAL PEAK amplitude A*shape
+        % (A = max|u'|). The real field is u'(z)=Re(q e^{i beta z})=|q|cos, whose
+        % z-average of products carries the 1/2 applied after the loop.
         qu = reshape(sPert.u(k,:,:), [Ny, Nx]);
         qv = reshape(sPert.v(k,:,:), [Ny, Nx]);
         qw = reshape(sPert.w(k,:,:), [Ny, Nx]);
 
-        % z-averaged Reynolds stresses  < u'_i u'_j >_z = Re(q_i conj(q_j))  (no factor 2)
+        % Reynolds stresses Re(q_i conj(q_j)); the z-average factor 1/2 is applied
+        % to P and I1..I4 after the loop (<u'_i u'_j>_z = (1/2) Re(q_i conj(q_j))).
         Ruu = real(qu .* conj(qu));
         Ruv = real(qu .* conj(qv));                  % = Rvu
         Rvv = real(qv .* conj(qv));
@@ -107,8 +113,9 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
         sRO.peakAmp(m) = max(abs(qu(:)));
 
         % ---- tangential/normal decomposition I1..I4 (ported from the 2021
-        %      script; leading factor 2 dropped, as for P). Amplitude/phase form
-        %      matching the original: A/2 = |q|, so (A/2)cos(Phase)=Re(q), etc.
+        %      script). Amplitude/phase form: the local Au=2|q| gives Au/2=|q|, so
+        %      (Au/2)cos(Phase)=Re(q). The shared z-average 1/2 is applied to I1..I4
+        %      after the loop (same as P), preserving I1+I2+I3+I4 = P.
         Au = 2*abs(qu);  Pu = angle(qu);
         Av = 2*abs(qv);  Pv = angle(qv);
         Aw = 2*abs(qw);  Pw = angle(qw);
@@ -179,6 +186,13 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
         sRO.I4a(:,:,m) = -lam.*I4a;  sRO.I4b(:,:,m) = -lam.*I4b;  sRO.I4c(:,:,m) = -lam.*I4c;
         sRO.I4d(:,:,m) = -lam.*I4d;  sRO.I4e(:,:,m) = -lam.*I4e;  sRO.I4f(:,:,m) = -lam.*I4f;
     end
+
+    % z-average factor: the Reynolds stress of a single spanwise mode is
+    %   <u'_i u'_j>_z = (1/2) Re(q_i conj(q_j)),   q = sPert = A*shape (PHYSICAL PEAK,
+    % A = max|u'|). The loop above formed Re(q_i conj(q_j)) without the 1/2; apply it
+    % here to P and every decomposition term (uniform scale -> preserves I1+..+I4 = P).
+    sRO.P = 0.5 * sRO.P;
+    for i = 1:numel(Idecomp); sRO.(Idecomp{i}) = 0.5 * sRO.(Idecomp{i}); end
 
     % Wall row (no-slip -> |V_base|=0 -> 0/0 in the tang/normal decomposition).
     % The 2021 script used cell-centre data with no wall row; here the wall is a

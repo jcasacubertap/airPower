@@ -228,4 +228,26 @@ const inp = (
         blnx    = 1200,     # IBL streamwise marching points
     ),
 
+    # ======================================================================
+    # PostProcessing — MATLAB base-flow / perturbation analysis
+    # The dispatcher (run.jl) exports this block to a generated MATLAB config
+    # (PostProcessing/inputs_gen.m) that run.m loads. `task` is normally set on
+    # the command line — julia run.jl PostProcessing <task> — overriding the
+    # default here.
+    # ======================================================================
+    PostProcessing = (
+        task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
+        loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
+        caseType       = "DFP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
+        fieldsFile     = "sweptwing_flat_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        loadAnalysis   = false,                # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
+        modeIdx        = Int[],                # spanwise modes to plot ([] -> all); general plotting selection
+        validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
+        ro = (
+            xLim       = Float64[],  # [xmin xmax] integration window; [] -> full
+            yLim       = Float64[],  # [ymin ymax] window; [] -> full
+            bufferFrac = 0.85,       # plot x-axis end fraction (buffer start); 1 -> full
+        ),
+    ),
+
 )
