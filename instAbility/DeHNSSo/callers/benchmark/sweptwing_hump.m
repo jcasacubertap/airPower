@@ -17,7 +17,7 @@ load(fullfile(input.folder, 'DeHNSSo_input.mat'));   % provides StabGrid
 %  total modes: (2M+1)(2N+1), including conjugates
 
 Stab.M = 0;                 % number of omega (temporal) modes
-Stab.N = 1;                 % number of beta (spanwise) modes
+Stab.N = 5;                 % number of beta (spanwise) modes
 Stab.omega_0 = 0;           % fundamental angular frequency (stationary)
 Stab.beta_0  = 2*pi * StabGrid.lref / 7.5e-3;   % fundamental spanwise wavenumber (lambda = 7.5 mm)
 
@@ -63,7 +63,7 @@ Opt.xb     = 85;            % buffer start [% of domain]
 %% Solver options
 % =========================================================================
 
-Opt.plot        = 'on';     % 'on' | 'off'
+Opt.plot        = 'off';     % 'on' | 'off'
 Opt.plot_metric = 'umax';   % 'umax' | 'urms' | 'energy'
 % Opt.Conv = 1e-4;          % final convergence criterion
 % Opt.TH   = 1e-11;         % NLT activation threshold
@@ -134,3 +134,9 @@ if strcmpi(Opt.plot, 'on')
     end
     plot_stability(StabGrid, StabRes, Opt);
 end
+
+% =========================================================================
+%% Save results in the DeHNSSo folder
+% =========================================================================
+save(fullfile(rootdir, 'sweptwing_hump_output.mat'), 'StabRes', 'StabGrid');
+fprintf('  saved -> %s\n', fullfile(rootdir, 'sweptwing_hump_output.mat'));

@@ -89,7 +89,7 @@ in.Stab.M        = 0;                  % temporal (omega) modes
 in.Stab.omega_0  = 0;                  % stationary
 in.Stab.IC       = 'ILST';             % inflow: local stability eigenmode
 in.Stab.phaseRef = 'umax';             % CFI phase reference
-in.Stab.A0_fund  = 1.0e-4/2;           % only a starting guess; the search sets it
+in.Stab.A0_fund  = 5.0e-5;           % only a starting guess; the search sets it
 
 %% -- Solver options (DeHNSSo main) --
 in.Opt.bc_top          = {'H_DR','H_DR','H_DR'};
@@ -123,7 +123,7 @@ in.match.rmsFactor = sqrt(2);          % |a| (=A/2) -> spanwise RMS = sqrt(2)*|a
 % Streamwise frame: the OpenFOAM/StabGrid x is measured from the INLET, while
 % the PIV x/c maps to arc-length S from the LE. They differ by xInlet, exactly
 % as in airPower's DFP validation (dfpvalidation.jl: x_DFP = S - xInlet, i.e.
-% S = xInlet + x_OF). So HNS npse.x (S-frame) = StabGrid.x*lref + xInlet.
+% S = xInlet + x_OF). So HNS hns.x (S-frame) = StabGrid.x*lref + xInlet.
 in.match.xOffset   = ap.xInlet;        % [m] = xInlet (align HNS x_OF -> PIV arc-length S)
 in.match.bufferFrac= 0.80;             % matched stations kept within this fraction of the run
 in.match.stationIdx= [];               % filled from xcWindow in AmplitudeFinisher.m

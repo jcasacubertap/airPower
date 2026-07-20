@@ -1,7 +1,7 @@
-function [J, diag] = wPrimeObjective(npse, piv, in)
+function [J, diag] = wPrimeObjective(hns, piv, in)
 % WPRIMEOBJECTIVE  Peak w'-RMS misfit between HNS and PIV.
 %
-%   [J, diag] = wPrimeObjective(npse, piv, in)
+%   [J, diag] = wPrimeObjective(hns, piv, in)
 %
 % Scalar diagnostic for the amplitude search. At each scored streamwise
 % station, take the PEAK (global max over the profile) of the w'-RMS profile
@@ -30,10 +30,10 @@ diag.res = zeros(1, numel(stations));
 
 for s = 1:numel(stations)
     i  = stations(s);
-    [~, ix] = min(abs(npse.x - piv.x(i)));      % nearest HNS station
+    [~, ix] = min(abs(hns.x - piv.x(i)));      % nearest HNS station
 
     yq    = piv.y{i};
-    rms_n = interp1(npse.y, npse.rmsFull(:, ix), yq, 'linear', 'extrap');
+    rms_n = interp1(hns.y, hns.rmsFull(:, ix), yq, 'linear', 'extrap');
     rms_p = local_target(piv, i);
     pn = max(rms_n);  pp = max(rms_p);          % main (CFI) peak over the profile
 

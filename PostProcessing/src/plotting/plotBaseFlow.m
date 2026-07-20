@@ -56,18 +56,34 @@ function fig = plotBaseFlow(sBF, inp, savedir)
         F   = sBF.(f);
 
         subplot(nF, 1, k);
-        contourf(X, Y, F, 30, 'LineStyle', 'none'); hold on;
 
-        % Diverging map centred at 0 only for fields that actually change sign;
-        % single-signed fields use parula (autoscaled) so their structure shows.
-        Fmin = min(F(isfinite(F)));  Fmax = max(F(isfinite(F)));
-        if ~isempty(Fmin) && Fmin < 0 && Fmax > 0
-            a = max(abs([Fmin Fmax]));
-            clim([-a a]);
-            colormap(gca, local_diverging());
+        % --- colour limits from ONLY the plotted window (bufferFrac x-cut x
+        %     near-wall y-cut). Changing bufferFrac re-derives the scale from the
+        %     visible region, so its structure is isolated rather than washed out
+        %     by out-of-window extremes (e.g. the outflow buffer). ---
+        inwin = (X >= xl(1) & X <= xl(2) & Y >= yl(1) & Y <= yl(2) & isfinite(F));
+        Fw = F(inwin);
+        if isempty(Fw); Fw = F(isfinite(F)); end
+        Fmin = min(Fw);  Fmax = max(Fw);
+        pos = max(Fmax, 0);  neg = max(-Fmin, 0);
+
+        % Diverging map (centred at 0) ONLY when genuinely two-signed: the
+        % minority-sign magnitude is >= 5% of the majority. A tiny recirculation
+        % negative then reads as single-signed -> parula fills the full range so
+        % the boundary layer shows clearly.
+        if pos > 0 && neg > 0 && min(pos,neg) >= 0.05*max(pos,neg)
+            a = max(pos, neg);  lo = -a;  hi = a;  cmap = local_diverging();
         else
-            colormap(gca, parula);
+            lo = Fmin;  hi = Fmax;  cmap = parula;
         end
+        if ~(hi > lo); hi = lo + eps(max(abs(lo),1)); end     % guard constant field
+
+        % Clamp to the window range so the 30 bands + colourbar resolve the
+        % visible region; out-of-window values saturate to the end colour.
+        Fc = min(max(F, lo), hi);
+        contourf(X, Y, Fc, 30, 'LineStyle', 'none'); hold on;
+        clim([lo hi]);
+        colormap(gca, cmap);
 
         cb = colorbar;
         cb.TickLabelInterpreter = 'latex';

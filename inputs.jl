@@ -12,7 +12,7 @@ const inp = (
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = false,            # true to activate the bump
+        enabled = true,            # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
         A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
@@ -33,7 +33,7 @@ const inp = (
     DFP = (
         # Domain geometry 
         domainLength = 0.325,    #0.650, # [m]
-        domainHeight = 0.020046, # [m]
+        domainHeight = 0.040092,  #0.020046, # [m]
 
         # Inflow parameters
         Uinf   = 12.417927662146404,                 # chordwise velocity [m/s]
@@ -52,7 +52,7 @@ const inp = (
 
         # Grid resolution (multipliers on base cell counts)
         gridXfactor = 4,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
-        gridYfactor = 2,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
+        gridYfactor = 3,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
 
         # Parallel
         nProcs = 8,
@@ -80,7 +80,7 @@ const inp = (
         ),
 
         # Output settings
-        outputFormat = "bin",           # csv | binary
+        outputFormat = "csv",           # csv | binary
         wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
@@ -213,7 +213,7 @@ const inp = (
         ),
         valPIV  = true,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
-        Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
+        Case    = 1,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
 
         # Spectral integral-boundary-layer (IBL) validation solver — shared by
         # the DFP (profile overlay) and TTCP (δ99/δ* comparison). When valBL is
@@ -222,7 +222,7 @@ const inp = (
         # node at blYi; blnx streamwise marching points. The domain height H is
         # taken per case from its own geometry — DFP: domainHeight, TTCP:
         # airfoilLE exportHeight (height of the exported data box).
-        valBL   = true,    # true to run the IBL solver (overlay/comparison)
+        valBL   = false,    # true to run the IBL solver (overlay/comparison)
         blNcheb = 120,     # IBL wall-normal Chebyshev node count
         blYi    = 0.002,   # IBL Chebyshev node median [m] (cluster in the BL)
         blnx    = 1200,     # IBL streamwise marching points
@@ -239,14 +239,14 @@ const inp = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
         loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
         caseType       = "DFP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "sweptwing_flat_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        fieldsFile     = "sweptwing_hump_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
         loadAnalysis   = false,                # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
         modeIdx        = Int[],                # spanwise modes to plot ([] -> all); general plotting selection
         validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
         ro = (
             xLim       = Float64[],  # [xmin xmax] integration window; [] -> full
             yLim       = Float64[],  # [ymin ymax] window; [] -> full
-            bufferFrac = 0.85,       # plot x-axis end fraction (buffer start); 1 -> full
+            bufferFrac = 0.50,       # plot x-axis end fraction (buffer start); 1 -> full
         ),
     ),
 

@@ -88,20 +88,15 @@ else
 
         case {'readdata', 'importdata'}
             % Base-flow plots always; perturbation plots too when loadFields
-            % provided sPert. Figures are saved as PNGs only in the terminal /
-            % dispatcher workflow (AIRPOWER_PP_DISPATCH set) — under
-            % io/plotting/<caseFolder>; a direct MATLAB run leaves them open.
-            if ~isempty(getenv('AIRPOWER_PP_DISPATCH'))
-                switch upper(inp.caseType)
-                    case 'DFP';  caseFolder = 'directFlatPlate';
-                    case 'TTCP'; caseFolder = 'tunnelToCurvedPlate';
-                    otherwise;   caseFolder = 'directFlatPlate';
-                end
-                savedir = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'plotting', caseFolder);
-                if ~exist(savedir, 'dir'); mkdir(savedir); end
-            else
-                savedir = '';   % direct MATLAB: show figures, do not save
+            % provided sPert. PNGs are saved under io/plotting/<caseFolder> in
+            % BOTH workflows — the dispatcher (headless matlab -batch) only writes
+            % the files, while a direct MATLAB run also leaves the figures open.
+            switch upper(inp.caseType)
+                case 'TTCP'; caseFolder = 'tunnelToCurvedPlate';
+                otherwise;   caseFolder = 'directFlatPlate';
             end
+            savedir = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'plotting', caseFolder);
+            if ~exist(savedir, 'dir'); mkdir(savedir); end
 
             plotBaseFlow(sBF, inp, savedir);                       % base flow (both modes)
             if ~isempty(sPert)

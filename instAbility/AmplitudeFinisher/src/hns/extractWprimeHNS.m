@@ -1,7 +1,7 @@
-function npse = extractWprimeHNS(out, in)
+function hns = extractWprimeHNS(out, in)
 % EXTRACTWPRIMEHNS  DeHNSSo StabRes -> w' mode RMS profiles + combined RMS.
 %
-%   npse = extractWprimeHNS(out, in)
+%   hns = extractWprimeHNS(out, in)
 %
 % From a runHNS bundle, extract the first nModes spanwise Fourier modes of w'
 % and reduce them to the combined RMS profile that is the match target.
@@ -18,10 +18,10 @@ function npse = extractWprimeHNS(out, in)
 % from the LE (+ in.match.xOffset to align with the PIV frame).
 %
 % Returns:
-%   npse.x     1 x nx        streamwise stations [m]
-%   npse.y     ny x 1        wall-normal coordinate [m]
-%   npse.mode  ny x nx x K   per-mode w' RMS profiles [m/s]
-%   npse.rms   ny x nx       combined RMS sqrt(sum_k mode_k^2) [m/s]
+%   hns.x     1 x nx        streamwise stations [m]
+%   hns.y     ny x 1        wall-normal coordinate [m]
+%   hns.mode  ny x nx x K   per-mode w' RMS profiles [m/s]
+%   hns.rms   ny x nx       combined RMS sqrt(sum_k mode_k^2) [m/s]
 
 res  = out.res;
 g    = out.grid;
@@ -45,8 +45,8 @@ else
 end
 
 % --- coordinates (physical, from LE) ------------------------------------
-npse.y = local_phys(g.etaun(:),  lref);              % ny x 1  [m]
-npse.x = local_phys(g.x(:).',    lref) + in.match.xOffset;   % 1 x nx  [m]
+hns.y = local_phys(g.etaun(:),  lref);              % ny x 1  [m]
+hns.x = local_phys(g.x(:).',    lref) + in.match.xOffset;   % 1 x nx  [m]
 
 [nmode, ny, nx] = size(res.w);                       %#ok<ASGLU>
 
@@ -58,7 +58,7 @@ phys = @(idx) squeeze(abs(res.w(idx,:,:))) .* (res.A(idx,:)/2) ...
               .* in.match.rmsFactor .* Uref;          % ny x nx  [m/s]
 
 % --- per-mode w' RMS profiles (first nK, for diagnostics) ----------------
-npse.mode = zeros(ny, nx, nK);
+hns.mode = zeros(ny, nx, nK);
 for k = 1:nK
     idx = find(abs(res.betavec - k*b0) <= tol, 1, 'first');
     if isempty(idx)
@@ -66,9 +66,9 @@ for k = 1:nK
               'No HNS mode with beta = %.4g (k=%d). betavec=[%s]', ...
               k*b0, k, num2str(res.betavec));
     end
-    npse.mode(:,:,k) = phys(idx);
+    hns.mode(:,:,k) = phys(idx);
 end
-npse.rms = sqrt(sum(npse.mode.^2, 3));                % per-mode RMS (diagnostic, first nK)
+hns.rms = sqrt(sum(hns.mode.^2, 3));                % per-mode RMS (diagnostic, first nK)
 
 % --- full-plane RMS over ALL spanwise harmonics (peak-match target) ------
 % By Parseval, the spanwise RMS of the reconstructed y-z plane is
@@ -78,7 +78,7 @@ for k = 1:Nsp
     idx = find(abs(res.betavec - k*b0) <= tol, 1, 'first');
     if ~isempty(idx); sumsq = sumsq + phys(idx).^2; end
 end
-npse.rmsFull = sqrt(sumsq);
+hns.rmsFull = sqrt(sumsq);
 end
 
 % -------------------------------------------------------------------------

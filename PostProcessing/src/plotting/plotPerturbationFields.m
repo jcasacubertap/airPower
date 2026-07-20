@@ -41,7 +41,16 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
 
         f = figure('Name', sprintf('Shape %s', tag), 'Color', 'w', ...
                    'Position', [60 60 900 320]);
-        contourf(X, Y, Qm, 30, 'LineStyle', 'none');
+        % Colour limits from ONLY the plotted window (bufferFrac x-cut x near-wall
+        % y-cut), so the visible structure is resolved rather than compressed by a
+        % peak sitting in the outflow buffer; |q| is a magnitude, so single-signed.
+        inwin = (X >= xl(1) & X <= xl(2) & Y >= yl(1) & Y <= yl(2) & isfinite(Qm));
+        Qw = Qm(inwin); if isempty(Qw); Qw = Qm(isfinite(Qm)); end
+        lo = min(Qw); hi = max(Qw);
+        if ~(hi > lo); hi = lo + eps(max(abs(lo),1)); end
+        Qc = min(max(Qm, lo), hi);                 % clamp; out-of-window saturates
+        contourf(X, Y, Qc, 30, 'LineStyle', 'none');
+        clim([lo hi]);
         colormap(gca, parula);
         cb = colorbar; cb.TickLabelInterpreter = 'latex'; cb.Label.Interpreter = 'latex';
         local_sciColorbar(cb, sprintf('$|%s|_{%s} / u_\\infty$', sym, ms));

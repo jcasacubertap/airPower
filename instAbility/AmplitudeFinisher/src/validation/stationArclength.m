@@ -10,7 +10,7 @@ function S_st = stationArclength(xc, in)
 % in airfoilFlowData/<file>.mat (fields BL.S, BL.x, BL.c).
 %
 % Returns S_st in metres, in the SAME frame as the assembled base flow's BL.x
-% (distance from the LE), so PIV and NPSE stations are directly comparable.
+% (distance from the LE), so PIV and HNS stations are directly comparable.
 %
 % The PIV station labels xc are interpreted as PERCENT-CHORD (x/c in %).
 

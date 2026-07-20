@@ -248,13 +248,24 @@ function [sBF, sPert, inp] = importFromFields(inp)
     R = S.StabRes;
 
     % --- base flow on the stability grid (Ny x Nx) ---
-    [Xg, Yg] = meshgrid(G.x(:).', G.y(:).');   % Ny x Nx
+    % Coordinates: prefer the PHYSICAL Cartesian arrays G.X/G.Y. They carry the
+    % actual wall geometry (e.g. a hump/roughness: G.Y rises with the bump) and
+    % use the inlet-origin frame, so the base flow matches the PreProcessing view.
+    % The 1-D G.x/G.y are wall-fitted (x from the LE; eta = flat wall at 0), which
+    % would flatten any wall feature. Fall back to meshgrid(G.x,G.y) for older
+    % grids without X/Y (flat wall, where the two representations coincide).
     [Ny, Nx] = size(G.U);
+    if isfield(G,'X') && isfield(G,'Y') && ...
+       isequal(size(G.X),[Ny,Nx]) && isequal(size(G.Y),[Ny,Nx])
+        Xg = G.X;  Yg = G.Y;
+    else
+        [Xg, Yg] = meshgrid(G.x(:).', G.y(:).');   % Ny x Nx (flat-wall fallback)
+    end
     if ~isequal(size(Xg), [Ny, Nx])
         error('importData:fieldsGridMismatch', ...
-              ['StabGrid base flow is %dx%d but meshgrid(x,y) is %dx%d. ', ...
-               'Expected y along rows (numel=%d) and x along cols (numel=%d).'], ...
-              Ny, Nx, size(Xg,1), size(Xg,2), numel(G.y), numel(G.x));
+              ['StabGrid base flow is %dx%d but the coordinate grid is %dx%d. ', ...
+               'Expected y along rows and x along cols.'], ...
+              Ny, Nx, size(Xg,1), size(Xg,2));
     end
 
     sBF.x = Xg;

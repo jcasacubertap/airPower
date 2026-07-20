@@ -9,26 +9,29 @@ addpath(rootdir, genpath(fullfile(rootdir, 'src')))
 
 %% Input
 input.folder     = fullfile(rootdir, '..', 'baseflow', 'output', 'benchmark');
-input.filename   = 'bf_sweptwing_hump.mat';
-input.format     = 'mat';
-input.structured = true;
+input.filename   = 'bf_sweptwing_hump.csv';
+input.format     = 'csv';
+input.structured = false;
 
 %% Resampling parameters
-params.n_eta_new = 80;           % heritage hump caller uses 50 × 1000
+params.n_eta_new = 60;              % heritage hump caller uses 50 × 1000
 params.n_xi_new  = 1200;
-params.y_i       = [];           % auto (H/10)
-params.H         = [];
+params.Uref      = 12.41792766;
+params.lref      = 2.3403348e-04;   % Blasius length at R=400 (matches bf_blasius.mat)
+params.Re        = 199.518703662;
+params.y_i       = [];              % auto (H/10)
+params.H         = [];              % auto
 params.xi_range  = [];
 params.xi_trim_inflow  = [];
 params.xi_trim_outflow = [];
-params.rescale   = false;        % BF already non-dim
+params.rescale   = true;            % BF already non-dim
 params.plot      = false;
 
 %% Streamwise refinement — Gaussian cluster around the hump centre.
 % Same parameters as heritage Example_Caller_CFI_hump_in_SweptWing_BL
 % (Grid.mug = x_m, Grid.sig = 0.2, Grid.ag = 0.5). Accepts vectors for
 % multiple humps: e.g. params.mug = [x_m1, x_m2], sig/ag scalar or vector.
-x_m = 0.1837410879 / 2.1394e-4;  % hump centre ≈ 859 (matches heritage)
+x_m = 0.08833 / 2.1394e-4;  % hump centre ≈ 859 (matches heritage)
 params.mug = [x_m];
 params.sig = [0.2];
 params.ag  = [0.5];
