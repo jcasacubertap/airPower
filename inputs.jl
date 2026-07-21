@@ -236,17 +236,16 @@ const inp = (
     # default here.
     # ======================================================================
     PostProcessing = (
-        task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
+        task           = "reynoldsOrrProdTerms",         # 'importData' | 'reynoldsOrrProdTerms'
         loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
         caseType       = "DFP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
         fieldsFile     = "sweptwing_hump_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
-        loadAnalysis   = false,                # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
-        modeIdx        = Int[],                # spanwise modes to plot ([] -> all); general plotting selection
+        modeIdx        = Int[2,3],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all
         validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
         ro = (
-            xLim       = Float64[],  # [xmin xmax] integration window; [] -> full
-            yLim       = Float64[],  # [ymin ymax] window; [] -> full
-            bufferFrac = 0.50,       # plot x-axis end fraction (buffer start); 1 -> full
+            loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
+            bufferFrac   = 0.60,       # plot x-axis end fraction (buffer start); 1 -> full
+            yMax         = 20.0,       # plot y-axis max (wall-normal, in y/delta0); [] -> near-wall fraction
         ),
     ),
 

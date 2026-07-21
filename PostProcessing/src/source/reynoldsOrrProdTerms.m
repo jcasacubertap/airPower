@@ -23,15 +23,12 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 %   sPert perturbation modes (full, amplitude-scaled fields from importData):
 %         .u .v .w  (Nmode x Ny x Nx) complex perturbation (NOT normalized)
 %         .beta     (1 x Nmode)       spanwise wavenumber of each mode
-%   inp.ro (all optional):
+%   inp.ro (optional):
 %         .modeIdx    modes to process (default: all with beta>0; beta=0 MFD excluded)
-%         .xLim,.yLim integration window in base-flow units (default: full domain)
 %
 % OUTPUT sRO:
 %   .beta    (1 x M)         spanwise wavenumber of each processed mode
 %   .P       (Ny x Nx x M)   production field per mode
-%   .intP    (1 x M)         volume integral of P over the window (signed)
-%   .intAbsP (1 x M)         volume integral of |P| over the window
 %   .peakAmp (1 x M)         max|u'| per mode (amplitude sanity-check)
 %   .I1..I4  (Ny x Nx x M)   tangential/normal production decomposition:
 %                            I1 normal-normal, I2 tang-normal, I3 normal-tang,
@@ -51,26 +48,12 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
     end
     [Ny, Nx] = size(sBF.u);
 
-    % ---- options (inp.ro overrides these defaults) ----
-    ro = struct('xLim', [], 'yLim', []);
-    if isfield(inp, 'ro') && ~isempty(inp.ro)
-        f = fieldnames(inp.ro);
-        for i = 1:numel(f)
-            if isfield(ro, f{i}), ro.(f{i}) = inp.ro.(f{i}); end
-        end
-    end
-    % mode selection is a general plotting input (inp.modeIdx), not ro-specific
-    modeSel = [];
-    if isfield(inp, 'modeIdx'); modeSel = inp.modeIdx; end
-
-    % ---- select spanwise-periodic modes (beta=0 MFD excluded: lambda_z -> Inf) ----
+    % ---- process ALL spanwise-periodic modes (beta=0 MFD excluded: lambda_z ->
+    %      Inf). Mode SELECTION for the plots happens downstream (inp.modeIdx);
+    %      the analysis always computes every available mode. ----
     beta   = sPert.beta(:).';
     bscale = max(1, max(abs(beta)));
-    if isempty(modeSel)
-        modeIdx = find(abs(beta) > 1e-8 * bscale);
-    else
-        modeIdx = modeSel(:).';
-    end
+    modeIdx = find(abs(beta) > 1e-8 * bscale);
     if isempty(modeIdx)
         error('reynoldsOrr:noModes', ...
               'No spanwise-periodic modes (beta>0). betavec = [%s].', num2str(beta));
@@ -80,6 +63,7 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
     % ---- production field per mode ----
     sRO.x = sBF.x;  sRO.y = sBF.y;
     sRO.beta    = beta(modeIdx);
+    sRO.modeNo  = modeIdx;        % original sPert index of each computed mode (for plot selection)
     sRO.P       = zeros(Ny, Nx, M);
     sRO.peakAmp = zeros(1, M);
     % tangential/normal decomposition fields (ported from the 2021 script)
@@ -201,25 +185,7 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 
     fprintf('reynoldsOrr: %d mode(s) [beta = %s]\n', M, num2str(sRO.beta, '%.4g '));
 
-    % ---- volume integral of P over the (optional) window ----
-    xrow  = sBF.x(1, :).';           % Nx x 1  (x varies along columns)
-    ycol  = sBF.y(:, 1);             % Ny x 1  (y varies down rows)
-    xmask = true(Nx,1);  if ~isempty(ro.xLim), xmask = xrow>=min(ro.xLim) & xrow<=max(ro.xLim); end
-    ymask = true(Ny,1);  if ~isempty(ro.yLim), ymask = ycol>=min(ro.yLim) & ycol<=max(ro.yLim); end
-
-    sRO.intP    = zeros(1, M);
-    sRO.intAbsP = zeros(1, M);
-    if nnz(xmask) < 2 || nnz(ymask) < 2
-        warning('reynoldsOrr:window', ...
-                'Integration window has <2 points in x or y; integrals left as 0.');
-        return;
-    end
-    xi       = xrow(xmask);
-    [yi, yo] = sort(ycol(ymask), 'ascend');          % ascending y so dy > 0 (physical)
-    for m = 1:M
-        Pm = sRO.P(ymask, xmask, m);
-        Pm = Pm(yo, :);                              % rows -> ascending y
-        sRO.intP(m)    = trapz(yi, trapz(xi, Pm,      2));
-        sRO.intAbsP(m) = trapz(yi, trapz(xi, abs(Pm), 2));
-    end
+    % NOTE: the volume integral of P (intP/intAbsP) was removed — the previous
+    % tensor-product trapz assumed a rectangular grid and is invalid on the
+    % wall-fitted (hump) grid. A metric-aware integral will be reintroduced later.
 end

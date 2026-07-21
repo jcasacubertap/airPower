@@ -32,7 +32,7 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
     xs    = X(1, cols);
     ns    = numel(cols);
 
-    % modes to show (general selection inp.modeIdx; [] -> all)
+    % modes to show (inp.modeIdx; [] -> all)
     Nmode = size(sPert.u, 1);
     if isfield(inp,'modeIdx') && ~isempty(inp.modeIdx)
         modes = inp.modeIdx(:).';

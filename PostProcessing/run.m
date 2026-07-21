@@ -56,7 +56,7 @@ inputs_gen;   % sets `inp` (from the PostProcessing block of airPower/inputs.jl)
 % Add paths
 addpath(genpath(fullfile(here, 'src')));
 
-if isfield(inp, 'loadAnalysis') && inp.loadAnalysis
+if isfield(inp, 'ro') && isfield(inp.ro, 'loadAnalysis') && inp.ro.loadAnalysis
     % ===== LOAD an existing analysis bundle from io/output and re-plot =====
     [~, stabname] = fileparts(inp.fieldsFile);
     bundle = fullfile(here, 'io', 'output', [stabname '_' inp.task '.mat']);
@@ -71,10 +71,16 @@ if isfield(inp, 'loadAnalysis') && inp.loadAnalysis
     % workspace is identical either way. Keep the current `inp` (may carry updated
     % plot options); the bundle's own inp stays inside S.
     sBF = S.sBF; sPert = S.sPert; sRO = S.sRO;
+    switch upper(inp.caseType)
+        case 'TTCP'; caseFolder = 'tunnelToCurvedPlate';
+        otherwise;   caseFolder = 'directFlatPlate';
+    end
+    savedir = fullfile(here, 'io', 'plotting', caseFolder);
+    if ~exist(savedir, 'dir'); mkdir(savedir); end
     switch lower(inp.task)
         case {'productionanalysis', 'reynoldsorrprodterms'}
-            plotReynoldsOrrProd(sRO, sBF, inp);
-            plotReynoldsOrrDecomp(sRO, sBF, inp);
+            plotReynoldsOrrProd(sRO, sBF, inp, savedir);
+            plotReynoldsOrrDecomp(sRO, sBF, inp, savedir);
         otherwise
             error('run:loadTask', ...
                   'loadAnalysis only supports reynoldsOrrProdTerms (got ''%s'').', inp.task);
@@ -84,20 +90,20 @@ else
     % ===== COMPUTE: import data, run the module, save + plot =====
     [sBF, sPert, inp] = importData(inp);
 
+    % PNG output folder, per physical case (io/plotting/<caseFolder>). Used by
+    % every plotter below so all figures land in the same case subfolder. Saved
+    % in BOTH workflows — the dispatcher (headless matlab -batch) only writes the
+    % files, a direct MATLAB run also leaves the figures open.
+    switch upper(inp.caseType)
+        case 'TTCP'; caseFolder = 'tunnelToCurvedPlate';
+        otherwise;   caseFolder = 'directFlatPlate';
+    end
+    savedir = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'plotting', caseFolder);
+    if ~exist(savedir, 'dir'); mkdir(savedir); end
+
     switch lower(inp.task)
 
         case {'readdata', 'importdata'}
-            % Base-flow plots always; perturbation plots too when loadFields
-            % provided sPert. PNGs are saved under io/plotting/<caseFolder> in
-            % BOTH workflows — the dispatcher (headless matlab -batch) only writes
-            % the files, while a direct MATLAB run also leaves the figures open.
-            switch upper(inp.caseType)
-                case 'TTCP'; caseFolder = 'tunnelToCurvedPlate';
-                otherwise;   caseFolder = 'directFlatPlate';
-            end
-            savedir = fullfile(inp.airPowerRoot, 'PostProcessing', 'io', 'plotting', caseFolder);
-            if ~exist(savedir, 'dir'); mkdir(savedir); end
-
             plotBaseFlow(sBF, inp, savedir);                       % base flow (both modes)
             if ~isempty(sPert)
                 plotPerturbationFields(sPert, sBF, inp, savedir);  % perturbation shapes + amplitude
@@ -114,8 +120,8 @@ else
                        'set inp.loadMode = ''loadFields''.']);
             end
             sRO = reynoldsOrrProdTerms(sBF, sPert, inp);
-            plotReynoldsOrrProd(sRO, sBF, inp);     % total P    -> io/plotting/reynoldsOrrProd.png
-            plotReynoldsOrrDecomp(sRO, sBF, inp);   % I1..I4     -> io/plotting/reynoldsOrrDecomp.png
+            plotReynoldsOrrProd(sRO, sBF, inp, savedir);     % total P -> io/plotting/<case>/reynoldsOrrProd.png
+            plotReynoldsOrrDecomp(sRO, sBF, inp, savedir);   % I1..I4  -> io/plotting/<case>/reynoldsOrrDecomp.png
 
             % Self-contained analysis bundle: production + base flow + perturbation
             % (+ inp as metadata), keyed to the Stab run it came from.
