@@ -21,14 +21,24 @@ ap = local_airpower_scalars(in.airPowerInputs);   % DFP-block scalars from input
 %  MAIN INPUTS  ── set these for a new base flow
 % =====================================================================
 
-% (1) Base flow: OpenFOAM flat-plate mid-plane CSV (columns x,y,z,u,v,w,p,omz),
-%     which DeHNSSo gridgen resamples onto the stability grid.
-%     This CSV is NOT hand-placed here: it is CONVERTED from the reference
-%     OpenFOAM output of the DirectFlatPlate module, i.e. the folder
-%       airPower/PreProcessing/modules/directFlatPlateModule/postProcessing
-%     The path below is just where that conversion writes/caches the result.
-in.gridgen.baseFlowCsv = fullfile(in.dehnssoRoot, 'baseflow', 'output', ...
-                                  'benchmark', 'bf_sweptwing_flat.csv');
+% (1) Problem geometry — selects the frame offset AND the gridgen caller name:
+%       'flat'   -> flat swept plate    (gridgen/benchmark/sweptwing_flat.m)
+%       'curved' -> M3J curved airfoil  (gridgen/benchmark/m3j.m)
+%     The flat plate omits wall curvature; the curved airfoil includes it (and
+%     buildStabGrid auto-computes the arc-length frame offset from the geometry).
+%     Run the matching gridgen caller for your problem, then paste the resulting
+%     DeHNSSo_input.mat into AmplitudeFinisher/io/ (keep the DeHNSSo name, for
+%     consistency). The tool trusts that DeHNSSo_input.mat corresponds to in.problem.
+in.problem = 'curved';                 % 'flat' | 'curved'
+in.stabGridFile = fullfile(airPowerRoot, 'instAbility', 'AmplitudeFinisher', ...
+                           'io', 'DeHNSSo_input.mat');
+switch lower(in.problem)
+    case 'flat';   in.caller = 'sweptwing_flat';
+    case 'curved'; in.caller = 'm3j';
+    otherwise
+        error('inputsAmplitudeFinisher:problem', ...
+              'in.problem must be ''flat'' or ''curved'' (got ''%s'').', in.problem);
+end
 
 % (2) Spanwise fundamental wavelength of the crossflow instability.
 in.Stab.lambda_z = 7.5e-3;             % [m]   (case '7d5mm')
@@ -47,10 +57,11 @@ in.Stab.N = 5;
 %     (need >=2 points, ideally one ratio<1 and one >1) so the root is bracketed.
 in.match.sweep = [0.8 1.0 1.25];
 
-% (6) PIV case. By default the generation/case are read from airPower/inputs.jl
-%     (VAL block). Override here with integers to force a specific case.
-in.VAL.Gen  = [];                      % [] -> read from inputs.jl
-in.VAL.Case = [];
+% (6) PIV target. Place the experimental PIV .mat in AmplitudeFinisher/io/ and
+%     give its name here. It holds the struct in.validation.structVar ('output')
+%     with the w'-RMS profiles and the streamwise stations (xc).
+in.pivName = '7d5mm_h0000.mat';        % file in AmplitudeFinisher/io/
+in.pivFile = fullfile(airPowerRoot, 'instAbility', 'AmplitudeFinisher', 'io', in.pivName);
 
 % (7) Machine profile — sets the solver memory/speed strategy in one place:
 %     'small' : <=16 GB RAM. lu_mode='none' (re-factorises each iter; low RAM,
@@ -61,28 +72,20 @@ in.VAL.Case = [];
 %               and multi-station runs.
 in.machine = 'small';
 
+% (8) Linear-check anchor. EVERY run produces a linear-check figure
+%     (AmplitudeFinisher_linearCheck.png) as a by-product: one linear HNS whose
+%     w'-RMS is anchored to PIV at this x/c. The figure title reports the implied
+%     A0_fund, and that SAME value seeds the nonlinear search (centre of
+%     in.match.sweep). Anchor upstream (near-linear) for the cleanest estimate.
+in.linearCheck.xcAnchor = 13;      % [% chord] station to anchor the linear amplitude to PIV
+
 % =====================================================================
 %  SECONDARY INPUTS  ── defaults are fine; change only if needed
 % =====================================================================
 
-%% -- Reference scales (non-dimensionalization), auto from inputs.jl DFP --
-in.Ref.U0 = ap.Uinf;                                   % reference velocity [m/s]
-in.Ref.nu = ap.nu;                                     % kinematic viscosity [m^2/s]
-in.Ref.L0 = sqrt(in.Ref.nu * ap.xInlet / in.Ref.U0);   % Blasius length at inlet [m]
-
-%% -- gridgen (base flow CSV -> StabGrid) --
-in.gridgen.outMat = fullfile(in.dehnssoRoot, 'input', 'DeHNSSo_input.mat');
-in.gridgen.mode   = 'auto';            % 'auto' | 'always' | 'never'
-in.gridgen.params = struct( ...
-    'n_eta_new', 60, 'n_xi_new', 1200, ...
-    'Uref', ap.Uinf, ...
-    'lref', in.Ref.L0, ...
-    'Re',   in.Ref.U0 * in.Ref.L0 / in.Ref.nu, ...
-    'y_i', [], 'H', [], 'xi_range', [], ...
-    'xi_trim_inflow', [], 'xi_trim_outflow', [], ...
-    'rescale', true, 'plot', false, ...
-    'FD_xi_order_1', 4, 'FD_xi_order_2', 2, ...
-    'FD_eta_method', 'cheb', 'FD_eta_order', 4);
+% (Base flow / gridgen inputs removed — the StabGrid is loaded directly from
+%  AmplitudeFinisher/io/DeHNSSo_input.mat; see MAIN input (1). Reference scales
+%  Uref/lref/Re come baked into that StabGrid.)
 
 %% -- Stability / disturbance (fixed for stationary crossflow) --
 in.Stab.M        = 0;                  % temporal (omega) modes
@@ -120,18 +123,24 @@ end
 % (NOT 1/sqrt(2): using 1/sqrt(2) double-counts the halving in A/2 and gives half
 % the true RMS, which over-scales the matched A0 by 2x).
 in.match.rmsFactor = sqrt(2);          % |a| (=A/2) -> spanwise RMS = sqrt(2)*|a| = A/sqrt(2)
-% Streamwise frame: the OpenFOAM/StabGrid x is measured from the INLET, while
-% the PIV x/c maps to arc-length S from the LE. They differ by xInlet, exactly
-% as in airPower's DFP validation (dfpvalidation.jl: x_DFP = S - xInlet, i.e.
-% S = xInlet + x_OF). So HNS hns.x (S-frame) = StabGrid.x*lref + xInlet.
-in.match.xOffset   = ap.xInlet;        % [m] = xInlet (align HNS x_OF -> PIV arc-length S)
+% Streamwise frame offset: hns.x = StabGrid.x*lref + xOffset aligns the HNS to
+% the PIV arc-length S from the LE. Set automatically by buildStabGrid per
+% problem -- flat: xOffset = xInlet (S = xInlet + x_OF, as in dfpvalidation.jl);
+% curved: xOffset = arc-length(LE -> grid origin), computed from the airfoil
+% geometry (constant to machine precision, since the grid wall-arc matches BL.S).
+in.match.xOffset   = [];               % [m] filled by buildStabGrid (see in.geom below)
+% Geometry for the frame offset. Flat uses xInlet; curved inverts the airfoil
+% surface x_phys(x/c) (as in PreProcessing airfoil_surface) to map each grid
+% column to x/c, then to S via the reference BL table.
+in.geom.xInlet     = ap.xInlet;        % [m]   flat: inlet distance from LE
+in.geom.airfoilFile= 'M3J.dat';        % curved: file in PreProcessing/io/airfoilGeometryData/
+in.geom.chord      = 0.900;            % [m]   curved: chord (matches inputs.jl TTCP)
+in.geom.alphaDeg   = -3.017;           % [deg] curved: AoA   (matches inputs.jl TTCP)
 in.match.bufferFrac= 0.80;             % matched stations kept within this fraction of the run
 in.match.stationIdx= [];               % filled from xcWindow in AmplitudeFinisher.m
 in.match.xStations = [];
 
-%% -- PIV data mapping --
-in.validation.rootDir     = fullfile(airPowerRoot, 'PreProcessing', 'io', 'Validation');
-in.validation.matFile     = '';        % '' -> first .mat in the Case dir
+%% -- PIV data mapping --  (PIV file itself is MAIN input (6): in.pivFile)
 in.validation.structVar   = 'output';
 in.validation.xField      = 'xc';
 in.validation.wFields     = {'w_pert_m_prof_rms_01','w_pert_m_prof_rms_02','w_pert_m_prof_rms_03'};

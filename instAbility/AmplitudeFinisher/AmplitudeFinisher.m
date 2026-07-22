@@ -24,21 +24,35 @@ AIRPOWER = fullfile(here, '..', '..');               % airPower root
 in = inputsAmplitudeFinisher(AIRPOWER);
 addpath(genpath(fullfile(in.dehnssoRoot, 'src')));   % DeHNSSo solver
 
-%% 1. Base flow -> StabGrid
-fprintf('\n[1/3] Building StabGrid from base flow ...\n');
-StabGrid = buildStabGrid(in);
+%% 1. Base flow -> StabGrid  (problem-specific: flat | curved)
+fprintf('\n[1/4] Building StabGrid from base flow ...\n');
+[StabGrid, in] = buildStabGrid(in);
 
-%% 2. PIV target for the requested Gen/Case
-if isempty(in.VAL.Gen) || isempty(in.VAL.Case)
-    [gen, caseId] = resolveGenCase(in.airPowerInputs);
-else
-    gen = in.VAL.Gen; caseId = in.VAL.Case;
-end
-fprintf('[2/3] Loading PIV: Gen%d / Case%d ...\n', gen, caseId);
-piv = loadPIVwPrime(in.validation.rootDir, gen, caseId, in);
+%% 2. PIV target (experimental .mat placed in AmplitudeFinisher/io/)
+fprintf('[2/4] Loading PIV: %s ...\n', in.pivName);
+piv = loadPIVwPrime(in.pivFile, in);
 in.validation.nModes = piv.nModes;   % HNS diagnostics match the PIV modes present
 
-% Select the stations in the chordwise window and truncate the domain to them.
+%% 3. Linear check (ALWAYS) -> figure + implied A0_fund that seeds the search
+% One LINEAR HNS, its w'-RMS anchored to PIV at a single station
+% (in.linearCheck.xcAnchor). A linear solution scales uniformly with the inlet
+% amplitude, so the one anchor scale applies everywhere: the up/downstream
+% comparison shows whether the LINEAR growth rate matches the experiment, and
+% the implied inlet A0_fund is the physical linear estimate — which then seeds
+% the nonlinear sweep below. Runs on a domain covering ALL PIV stations.
+xEndL = max(piv.x) / in.match.bufferFrac;
+[SGlin, tL] = truncateStabGrid(StabGrid, xEndL, in);
+fprintf('[3/4] Linear check: one linear HNS anchored at x/c = %g%% (domain nx %d -> %d) ...\n', ...
+        in.linearCheck.xcAnchor, tL.nxOld, tL.nxNew);
+lc = linear_check(SGlin, piv, in);
+fprintf('\n=============== linear check ===============\n');
+fprintf('  anchor x/c            : %g%%\n', in.linearCheck.xcAnchor);
+fprintf('  implied A0_fund (lin) : %.6g   <- seeds the nonlinear sweep\n', lc.A0implied);
+fprintf('============================================\n');
+plot_linear_check(lc, piv, in, here);
+fprintf('  saved: %s\n', fullfile(here, 'AmplitudeFinisher_linearCheck.png'));
+
+%% 4. Nonlinear amplitude match over the chordwise window (seeded by lc.A0implied)
 sel = find(piv.xc >= in.match.xcWindow(1) & piv.xc <= in.match.xcWindow(2));
 if isempty(sel)
     error('AmplitudeFinisher:emptyWindow', ...
@@ -47,13 +61,11 @@ if isempty(sel)
 end
 in.match.stationIdx = sel;
 xEnd = piv.x(sel(end)) / in.match.bufferFrac;
-[StabGrid, tinfo] = truncateStabGrid(StabGrid, xEnd, in);
-fprintf('      Matching x/c = %s ; domain nx %d -> %d\n', ...
+[SGmatch, tinfo] = truncateStabGrid(StabGrid, xEnd, in);
+fprintf('[4/4] Matching amplitude (peak w'' RMS) ; x/c = %s ; domain nx %d -> %d\n', ...
         num2str(piv.xc(sel)), tinfo.nxOld, tinfo.nxNew);
-
-%% 3. Find the matching amplitude
-fprintf('[3/3] Matching amplitude (peak w'' RMS) ...\n');
-result = findAmplitude(StabGrid, piv, in);
+result = findAmplitude(SGmatch, piv, in, lc.A0implied);
+StabGrid = SGmatch;   % the (window-truncated) grid actually used by the match
 
 %% Report + plot
 fprintf('\n================= AmplitudeFinisher =================\n');
@@ -70,7 +82,7 @@ fprintf('=====================================================\n');
 % and a headline `meta` summary. NOTE: there is no full StabRes here — result.A0
 % is the interpolated ratio->1 crossing and no solve is run at it; result.hns is
 % the extracted w' at A0sweptBest. To post-process the matched solution, run the
-% DeHNSSo caller (sweptwing_flat.m) with Stab.A0_fund = result.A0 on the full
+% matching DeHNSSo caller (in.caller: sweptwing_flat.m/m3j.m) with A0_fund=result.A0 on the full
 % domain (verbatim, no /2).
 meta = struct( ...
     'A0_fund',       result.A0, ...          % <-- plug into DeHNSSo caller VERBATIM (no /2)
@@ -83,10 +95,11 @@ meta = struct( ...
     'xOffset',       in.match.xOffset, ...
     'Uref',          StabGrid.Uref, ...
     'lref',          StabGrid.lref, ...
-    'gen',           gen, ...
-    'caseId',        caseId, ...
+    'pivFile',       in.pivName, ...
     'savedOn',       char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')), ...
-    'note',          'A0_fund = result.A0 -> caller line 28 verbatim (no /2); rmsFactor=sqrt(2) convention');
+    'problem',       in.problem, ...
+    'caller',        in.caller, ...
+    'note',          sprintf('A0_fund = result.A0 -> DeHNSSo caller %s.m verbatim (no /2); rmsFactor=sqrt(2)', in.caller));
 
 matFile = fullfile(here, 'AmplitudeFinisher_match.mat');
 save(matFile, 'result', 'in', 'piv', 'sel', 'StabGrid', 'meta', '-v7.3');
@@ -119,4 +132,35 @@ end
 sgtitle(sprintf('AmplitudeFinisher: A0 = %.4g (N=%d)', result.A0, result.N));
 saveas(fig, fullfile(outdir, 'AmplitudeFinisher_match.png'));
 fprintf('  saved: %s\n', fullfile(outdir, 'AmplitudeFinisher_match.png'));
+end
+
+
+% ---------------------------------------------------------------------
+function plot_linear_check(lc, piv, in, outdir)
+% Overlay PIV vs the amplitude-anchored LINEAR HNS w'-RMS at ALL stations, so
+% both up- and down-stream of the anchor are visible. The linear curve is scaled
+% by the single anchor factor lc.c (peak-matched to PIV at xcAnchor); if the
+% linear growth rate is right it tracks PIV everywhere, otherwise it diverges
+% up/downstream — the linear-vs-nonlinear verdict.
+hns = lc.hns;  nS = numel(piv.x);
+nc = min(nS, 5);  nr = ceil(nS/nc);
+fig = figure('Position', [40 40 300*nc 340*nr]);
+for k = 1:nS
+    subplot(nr, nc, k);
+    [~, ix] = min(abs(hns.x - piv.x(k)));
+    hn = lc.c * interp1(hns.y, hns.rmsFull(:, ix), piv.y{k}, 'linear', 'extrap');
+    if isfield(piv,'rmsFull') && ~isempty(piv.rmsFull{k}); g = piv.rmsFull{k}; else; g = piv.rms{k}; end
+    plot(g, piv.y{k}*1e3, 'ko-', 'MarkerSize', 3); hold on;
+    plot(hn, piv.y{k}*1e3, 'r-', 'LineWidth', 2);
+    if mod(k-1,nc)==0; ylabel('y [mm]'); end
+    if k > nS-nc; xlabel('w'' RMS [m/s]'); end
+    ttl = sprintf('x/c = %g%%', piv.xc(k));
+    if k == lc.ianchor; ttl = [ttl ' (anchor)']; end
+    title(ttl); grid on; ylim([0 4]);
+    if k==1; legend('PIV', 'linear HNS', 'Location', 'northeast', 'FontSize', 7); end
+end
+sgtitle(sprintf('Linear check: anchored at x/c = %g%%,  implied A0_{fund} = %.4g  (N=%d)', ...
+        in.linearCheck.xcAnchor, lc.A0implied, lc.N));
+saveas(fig, fullfile(outdir, 'AmplitudeFinisher_linearCheck.png'));
+fprintf('  saved: %s\n', fullfile(outdir, 'AmplitudeFinisher_linearCheck.png'));
 end

@@ -1,9 +1,10 @@
-function piv = loadPIVwPrime(valRoot, gen, caseId, in)
-% LOADPIVWPRIME  Load the experimental PIV w' target for a Gen/Case.
+function piv = loadPIVwPrime(matPath, in)
+% LOADPIVWPRIME  Load the experimental PIV w' target from a .mat file.
 %
-%   piv = loadPIVwPrime(valRoot, gen, caseId, in)
+%   piv = loadPIVwPrime(matPath, in)
 %
-% Reads Validation/Gen{gen}/Experimental/Case{caseId}/*.mat. The file holds a
+% Reads the PIV .mat at matPath (placed in AmplitudeFinisher/io/, named in
+% in.pivName). The file holds a
 % struct (in.validation.structVar, default 'output') of 1 x nStations cell
 % arrays. For each spanwise-Fourier mode k = 1..nModes it extracts the
 % wall-normal RMS profile of w': w_pert_m_prof_rms_0k(y_prof_rms_0k), at the
@@ -23,21 +24,10 @@ function piv = loadPIVwPrime(valRoot, gen, caseId, in)
 %   piv.file     source .mat path
 %   piv.nModes   number of modes loaded
 
-caseDir = fullfile(valRoot, sprintf('Gen%d', gen), 'Experimental', ...
-                   sprintf('Case%d', caseId));
-if ~isfolder(caseDir)
-    error('loadPIVwPrime:noCase', 'Case dir not found: %s', caseDir);
-end
-
-% --- locate & load the .mat ---------------------------------------------
-if ~isempty(in.validation.matFile)
-    matPath = fullfile(caseDir, in.validation.matFile);
-else
-    hits = dir(fullfile(caseDir, '*.mat'));
-    if isempty(hits)
-        error('loadPIVwPrime:noMat', 'No .mat files in %s', caseDir);
-    end
-    matPath = fullfile(caseDir, hits(1).name);
+% --- load the .mat ------------------------------------------------------
+if ~isfile(matPath)
+    error('loadPIVwPrime:noMat', ...
+          'PIV .mat not found:\n  %s\n(set in.pivName to a file in io/).', matPath);
 end
 S = load(matPath);
 

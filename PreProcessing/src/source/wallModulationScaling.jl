@@ -19,12 +19,13 @@
 # analytic profile without running the solver.
 
 """
-    BaselineBL(ub, dstar, nu, xlo, xhi, Alo, Ahi)
+    BaselineBL(ub, dstar, d99, nu, xlo, xhi, Alo, Ahi)
 
 Undisturbed baseline boundary layer used to evaluate the bump-scaling relations.
 
   - `ub(x, y)`   → streamwise (chordwise) velocity at station `x`, height `y` [m/s]
   - `dstar(x)`   → displacement thickness δ*(x) [m]
+  - `d99(x)`     → 99% boundary-layer thickness δ99(x) [m]
   - `nu`         → kinematic viscosity [m²/s]
   - `[xlo, xhi]` → bracket for root-finds over the bump station x [m]
   - `[Alo, Ahi]` → bracket for root-finds over the bump height A [m]
@@ -32,6 +33,7 @@ Undisturbed baseline boundary layer used to evaluate the bump-scaling relations.
 struct BaselineBL
     ub::Function
     dstar::Function
+    d99::Function
     nu::Float64
     xlo::Float64
     xhi::Float64
@@ -118,6 +120,19 @@ end
 
 _trapz(x, y) = sum((x[i+1] - x[i]) * (y[i+1] + y[i]) / 2 for i in 1:length(x)-1)
 
+# δ99: wall-normal location where u first reaches 0.99·Ue (linear interp between
+# the bracketing nodes). `u` runs wall→edge ascending in `y`; `Ue` is the edge value.
+function _delta99(y, u, Ue)
+    thr = 0.99 * Ue
+    for k in 1:length(u)-1
+        if u[k] <= thr <= u[k+1]
+            t = (thr - u[k]) / (u[k+1] - u[k])
+            return y[k] + t * (y[k+1] - y[k])
+        end
+    end
+    return y[end]   # never reaches 0.99·Ue within the domain → cap at the top
+end
+
 function _interp1(xs, ys, x)
     x <= xs[1]   && return ys[1]
     x >= xs[end] && return ys[end]
@@ -159,16 +174,20 @@ function baseline_from_ibl(sol; nu::Real, Amax::Union{Real,Nothing}=nothing,
     Uxy = permutedims(U)                          # nx × ny, indexed [ix, iy]
     nx  = length(Xg)
 
-    ds = Vector{Float64}(undef, nx)
+    ds   = Vector{Float64}(undef, nx)
+    d99v = Vector{Float64}(undef, nx)
     for k in 1:nx
         prof = Uxy[k, :]                          # ascending y, wall→edge
-        ds[k] = _trapz(Yv, 1 .- prof ./ prof[end])
+        Ue   = prof[end]
+        ds[k]   = _trapz(Yv, 1 .- prof ./ Ue)
+        d99v[k] = _delta99(Yv, prof, Ue)
     end
 
     ub(x, y) = _bilinear(Xg, Yv, Uxy, x, y)
     dstar(x) = _interp1(Xg, ds, x)
+    d99(x)   = _interp1(Xg, d99v, x)
     span = Xg[end] - Xg[1]
-    return BaselineBL(ub, dstar, Float64(nu),
+    return BaselineBL(ub, dstar, d99, Float64(nu),
                       Xg[1] + xtrim*span, Xg[end] - xtrim*span,
                       1e-7, Amax === nothing ? Yv[end] : Float64(Amax))
 end
@@ -196,8 +215,9 @@ reset_dfp_bump!() = (_DFP_BUMP_CACHE[] = nothing)
     dfp_bump_geometry() → (A, xCenter, Rek, AoverDstar)
 
 Resolve the DFP bump from `inp.DFP.wallModulation`. Specify exactly two of
-{A, xCenter, Rek, AoverDstar}: a directly-given {A, xCenter} skips the solver;
-any Rek/AoverDstar target runs the IBL baseline once (cached) and `resolve_bump`
+{A, xCenter, Rek, AoverDstar}: a directly-given {A, xCenter} skips the solver but
+still reports the equivalent Rek and A/δ* on the IBL baseline (best-effort); any
+Rek/AoverDstar target runs the IBL baseline once (cached) and `resolve_bump`
 solves the rest. The resolved `A` overrides the shared `inp.wallModulation.A`
 for the DFP. (ESN/`xCenter` only for now; sigmoidal scaling is future work.)
 """
@@ -220,7 +240,21 @@ function dfp_bump_geometry()
     else
         xc === nothing && error("DFP.wallModulation: direct mode needs xCenter (with A, or shared wallModulation.A).")
         Aeff = A !== nothing ? A : inp.wallModulation.A
-        (A = Aeff, xCenter = xc, Rek = nothing, AoverDstar = nothing)
+        # Direct {A, xCenter}: no solve. Still REPORT the resulting Rek and A/δ*
+        # by evaluating them on the IBL baseline (best-effort — skipped with a
+        # warning if the IBL solver is unavailable, so direct mode never fails
+        # just for the diagnostic).
+        rekVal = nothing; aodVal = nothing
+        try
+            bl     = ibl_baseline_bl()
+            rekVal = _rek(bl, Aeff, xc)
+            aodVal = Aeff / bl.dstar(xc)
+            aod99  = Aeff / bl.d99(xc)
+            @info "DFP bump (direct {A, xCenter}) → equivalent scaling" A = Aeff xCenter = xc Rek = round(rekVal, digits = 2) AoverDstar = round(aodVal, digits = 4) AoverD99 = round(aod99, digits = 4)
+        catch err
+            @warn "DFP bump: could not evaluate Rek / A·δ*⁻¹ (IBL baseline unavailable)" exception = err
+        end
+        (A = Aeff, xCenter = xc, Rek = rekVal, AoverDstar = aodVal)
     end
     _DFP_BUMP_CACHE[] = res
     return res

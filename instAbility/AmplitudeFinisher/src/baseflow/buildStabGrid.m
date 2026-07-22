@@ -1,61 +1,80 @@
-function StabGrid = buildStabGrid(in)
-% BUILDSTABGRID  OpenFOAM flat-plate base flow -> DeHNSSo StabGrid via gridgen.
+function [StabGrid, in] = buildStabGrid(in)
+% BUILDSTABGRID  Load the DeHNSSo StabGrid (base flow) and set the frame offset.
 %
-%   StabGrid = buildStabGrid(in)
+%   [StabGrid, in] = buildStabGrid(in)
 %
-% Wraps DeHNSSo's main_gridgen: reads the OpenFOAM mid-plane csv
-% (x,y,z,u,v,w,p,omz), resamples it onto the Malik-Chebyshev eta x equidistant
-% xi grid (unstructured path), builds all metric terms and base-flow
-% derivatives, and returns the StabGrid struct main() consumes. The result is
-% cached to in.gridgen.outMat.
-%
-% in.gridgen.mode:
-%   'auto'   run gridgen only if outMat is missing or older than the csv
-%   'always' always re-run gridgen
-%   'never'  require an existing outMat (error if absent), skip gridgen
+% The StabGrid is produced OUTSIDE this tool: run the DeHNSSo gridgen caller for
+% your problem (in.caller), then paste the resulting DeHNSSo_input.mat into
+% AmplitudeFinisher/io/ (in.stabGridFile). This function loads it and sets
+% the streamwise frame offset in.match.xOffset so that
+%     hns.x = StabGrid.x*lref + xOffset
+% is arc-length S from the LE (same frame as the PIV stations):
+%   * flat   -> xOffset = in.geom.xInlet (the flat-plate inlet distance from LE).
+%   * curved -> xOffset = arc-length(LE -> grid origin), computed from the airfoil
+%               geometry: invert x_phys(x/c) (as in PreProcessing airfoil_surface)
+%               against the grid's Cartesian wall X, then map x/c -> S via the
+%               reference BL table. This offset is constant to machine precision
+%               because the grid wall-arc metric matches BL.S.
+% There is deliberately NO CSV/gridgen/cache logic here.
 
-gg = in.gridgen;
-
-needBuild = strcmpi(gg.mode,'always');
-if strcmpi(gg.mode,'auto')
-    if ~isfile(gg.outMat)
-        needBuild = true;
-    else
-        dcsv = dir(gg.baseFlowCsv);  dmat = dir(gg.outMat);
-        if isempty(dcsv)
-            error('buildStabGrid:noCsv','Base-flow csv not found: %s', gg.baseFlowCsv);
-        end
-        needBuild = dmat.datenum < dcsv.datenum;   % csv newer than cache
+    f = in.stabGridFile;
+    if ~isfile(f)
+        error('buildStabGrid:noFile', ...
+              ['StabGrid not found:\n  %s\n\n' ...
+               'Run the ''%s'' gridgen caller for the ''%s'' problem and paste its ' ...
+               'DeHNSSo_input.mat there.'], f, in.caller, in.problem);
     end
-elseif strcmpi(gg.mode,'never')
-    if ~isfile(gg.outMat)
-        error('buildStabGrid:noCache', ...
-              'gridgen mode ''never'' but no StabGrid at %s', gg.outMat);
-    end
-    needBuild = false;
-end
-
-if needBuild
-    if ~isfile(gg.baseFlowCsv)
-        error('buildStabGrid:noCsv','Base-flow csv not found: %s', gg.baseFlowCsv);
-    end
-    fprintf('[buildStabGrid] Running DeHNSSo gridgen on %s ...\n', gg.baseFlowCsv);
-    ggRoot = fullfile(in.dehnssoRoot, 'gridgen');
-    addpath(ggRoot, genpath(fullfile(ggRoot, 'src')));
-
-    [inFolder, inName, inExt] = fileparts(gg.baseFlowCsv);
-    input = struct('folder', inFolder, 'filename', [inName inExt], ...
-                   'format', 'csv', 'structured', false);
-    [outFolder, outName, outExt] = fileparts(gg.outMat);
-    output = struct('folder', outFolder, 'filename', [outName outExt]);
-
-    StabGrid = main_gridgen(input, gg.params, output);
-else
-    fprintf('[buildStabGrid] Loading cached StabGrid: %s\n', gg.outMat);
-    S = load(gg.outMat);
-    if ~isfield(S,'StabGrid')
-        error('buildStabGrid:badMat','%s has no StabGrid variable', gg.outMat);
+    S = load(f);
+    if ~isfield(S, 'StabGrid')
+        error('buildStabGrid:noStabGrid', ...
+              '%s has no ''StabGrid'' variable (is it a DeHNSSo gridgen output?).', f);
     end
     StabGrid = S.StabGrid;
+    fprintf('[buildStabGrid] problem=%s  <-  %s\n', in.problem, f);
+
+    % --- streamwise frame offset (per problem) ---------------------------
+    switch lower(in.problem)
+        case 'flat'
+            in.match.xOffset = in.geom.xInlet;
+        case 'curved'
+            in.match.xOffset = local_curved_xoffset(StabGrid, in);
+        otherwise
+            error('buildStabGrid:problem', 'Unknown in.problem ''%s''.', in.problem);
+    end
+    fprintf('[buildStabGrid] xOffset = %.6g m  (%s frame)\n', in.match.xOffset, in.problem);
 end
+
+% -------------------------------------------------------------------------
+function xOff = local_curved_xoffset(G, in)
+% Arc-length from the LE to the curved grid's arc origin. Map each wall column
+% to x/c by inverting the airfoil surface x_phys(x/c) (PreProcessing
+% airfoil_surface), then to S via the reference BL(x -> S) table; the offset
+% S - StabGrid.x*lref is constant, so return its mean.
+    root = in.airPowerRoot;
+    datF = fullfile(root, 'PreProcessing', 'io', 'airfoilGeometryData', in.geom.airfoilFile);
+    if ~isfile(datF)
+        error('buildStabGrid:noAirfoil', 'Airfoil geometry not found: %s', datF);
+    end
+    D = readmatrix(datF);
+    xi = D(:,1); et = D(:,2);
+    m = et >= 0; xi = xi(m); et = et(m);          % upper surface, LE -> TE
+    [xi, p] = sort(xi); et = et(p);
+    [xi, iu] = unique(xi); et = et(iu);
+    c  = in.geom.chord;  al = in.geom.alphaDeg * pi/180;
+    xf = linspace(0, 1, 4000).';  ef = interp1(xi, et, xf, 'spline');
+    xphys = cos(al)*(xf - 0.5)*c + sin(al)*ef*c;  % airfoil_surface chordwise coord [m]
+    mono  = xf <= 0.55;                            % monotonic front half (covers the window)
+
+    if ~isfield(G, 'X')
+        error('buildStabGrid:noCartesian', ...
+              'Curved StabGrid lacks Cartesian ''X'' (needed for the x/c frame offset).');
+    end
+    [~, iw] = min(abs(G.y));                       % wall row (y = 0)
+    Xw   = G.X(iw, :) * G.lref;                     % wall Cartesian x [m]
+    xcCol = interp1(xphys(mono), xf(mono), Xw, 'linear', 'extrap');   % x/c fraction
+
+    BLp = fullfile(root, 'PreProcessing', 'io', 'airfoilFlowData', in.validation.refFlowData);
+    BL  = load(BLp);  BL = BL.BL;
+    Sref = interp1(BL.x(:), BL.S(:), xcCol * c, 'linear', 'extrap');  % arc from LE [m]
+    xOff = mean(Sref - G.x(:).' * G.lref);
 end

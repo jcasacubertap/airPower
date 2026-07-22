@@ -118,16 +118,15 @@ function write_pp_config(pp, task)
         println(io, "inp.loadMode       = $(mat_lit(pp.loadMode));")
         println(io, "inp.caseType       = $(mat_lit(pp.caseType));")
         println(io, "inp.fieldsFile     = $(mat_lit(pp.fieldsFile));")
-        println(io, "inp.loadAnalysis   = $(mat_lit(pp.loadAnalysis));")
         println(io, "inp.modeIdx        = $(mat_lit(pp.modeIdx));")
         println(io, "inp.validation     = $(mat_lit(pp.validation));")
         # pulled from the PreProcessing blocks (no PostProcessing duplication):
         println(io, "inp.valGen         = $(mat_lit(inp.VAL.Gen));")
         println(io, "inp.valCase        = $(mat_lit(inp.VAL.Case));")
         println(io, "inp.xInlet         = $(mat_lit(inp.DFP.xInlet));")
-        println(io, "inp.ro.xLim        = $(mat_lit(pp.ro.xLim));")
-        println(io, "inp.ro.yLim        = $(mat_lit(pp.ro.yLim));")
+        println(io, "inp.ro.loadAnalysis = $(mat_lit(pp.ro.loadAnalysis));")
         println(io, "inp.ro.bufferFrac  = $(mat_lit(pp.ro.bufferFrac));")
+        println(io, "inp.ro.yMax        = $(mat_lit(pp.ro.yMax));")
     end
     return gen
 end

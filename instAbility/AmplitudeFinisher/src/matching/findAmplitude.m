@@ -1,4 +1,4 @@
-function result = findAmplitude(StabGrid, piv, in)
+function result = findAmplitude(StabGrid, piv, in, seed)
 % FINDAMPLITUDE  Pin the disturbance amplitude Stab.A0_fund to the PIV.
 %
 %   result = findAmplitude(StabGrid, piv, in)
@@ -22,12 +22,20 @@ function result = findAmplitude(StabGrid, piv, in)
 
 N = in.Stab.N;
 
-%% 1. Linear seed
-fprintf('\n[seed] linear solve ...\n');
-outL = runHNS(StabGrid, in.Stab.A0_fund, N, in, 'linear');
-hnsL = extractWprimeHNS(outL, in);
-seed = local_linear_seed(hnsL, outL, piv, in);
-fprintf('[seed] A0_seed = %.4g\n', seed);
+%% 1. Amplitude seed
+% Prefer the linear-check A0_fund (anchored at in.linearCheck.xcAnchor) passed in
+% by the caller -- one linear estimate feeds BOTH the linear-check figure and the
+% centre of this sweep. Fall back to a window-projected linear seed if not given.
+if nargin >= 4 && ~isempty(seed) && isfinite(seed) && seed > 0
+    fprintf('\n[seed] linear-check A0_fund = %.4g (anchored x/c = %g%%)\n', ...
+            seed, in.linearCheck.xcAnchor);
+else
+    fprintf('\n[seed] linear solve ...\n');
+    outL = runHNS(StabGrid, in.Stab.A0_fund, N, in, 'linear');
+    hnsL = extractWprimeHNS(outL, in);
+    seed = local_linear_seed(hnsL, outL, piv, in);
+    fprintf('[seed] A0_seed = %.4g\n', seed);
+end
 
 %% 2. Nonlinear bracket sweep
 A0list = seed * in.match.sweep;

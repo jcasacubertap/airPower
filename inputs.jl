@@ -12,7 +12,7 @@ const inp = (
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = true,            # true to activate the bump
+        enabled = false,            # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
         A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
@@ -32,7 +32,7 @@ const inp = (
     # ======================================================================
     DFP = (
         # Domain geometry 
-        domainLength = 0.325,    #0.650, # [m]
+        domainLength = 0.325,     #0.650, # [m]
         domainHeight = 0.040092,  #0.020046, # [m]
 
         # Inflow parameters
@@ -51,8 +51,8 @@ const inp = (
         freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
-        gridXfactor = 4,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
-        gridYfactor = 3,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
+        gridXfactor = 3,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
+        gridYfactor = 2,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
 
         # Parallel
         nProcs = 8,
@@ -67,10 +67,10 @@ const inp = (
             #    geometry (no solve). Any Rek/AoverDstar target triggers the IBL
             #    inversion. A resolved A overrides the shared wallModulation.A.
             #    (ESN/xCenter only for now; sigmoidal scaling is future work.)
-            A          = 1E-03,        # [m]  bump height       (number, or nothing → solve)
-            xCenter    = 0.08833,      # [m]  ESN bump center   (number, or nothing → solve)
-            Rek        = nothing,      # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
-            AoverDstar = nothing,      # [-]  A / δ*(xCenter)              (target, or nothing)
+            A          = nothing,        # [m]  bump height       (number, or nothing → solve)
+            xCenter    = nothing,        # [m]  ESN bump center   (number, or nothing → solve)
+            Rek        = 3000,           # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
+            AoverDstar = 4.9898,         # [-]  A / δ*(xCenter)              (target, or nothing)
 
             # Sigmoidal extents (used only by the sigmoidal shape; not part of
             # the scaling spec)
@@ -149,7 +149,7 @@ const inp = (
             gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
 
             # Export / post-processing
-            outputFormat = "binary",       # csv | binary
+            outputFormat = "csv",       # csv | binary
             exportMode   = "partial",   # full | partial
             xiInlet      = 0.02,        # chord fraction for inlet boundary
             xiOutlet     = 0.50,        # chord fraction for outlet boundary
@@ -213,7 +213,7 @@ const inp = (
         ),
         valPIV  = true,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
-        Case    = 1,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
+        Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
 
         # Spectral integral-boundary-layer (IBL) validation solver — shared by
         # the DFP (profile overlay) and TTCP (δ99/δ* comparison). When valBL is
@@ -236,10 +236,10 @@ const inp = (
     # default here.
     # ======================================================================
     PostProcessing = (
-        task           = "reynoldsOrrProdTerms",         # 'importData' | 'reynoldsOrrProdTerms'
+        task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
         loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
         caseType       = "DFP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "sweptwing_hump_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        fieldsFile     = "sweptwing_flat_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
         modeIdx        = Int[2,3],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all
         validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
         ro = (
