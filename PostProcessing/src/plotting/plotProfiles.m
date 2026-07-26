@@ -18,7 +18,7 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
     if nargin < 4; savedir = ''; end
     figs = gobjects(0);
 
-    X = sBF.x;  Y = sBF.y;
+    [X, Y] = plotCoords(sBF, inp);             % wall-fitted rectangle (unwraps curved TTCP wall)
     Nx = size(X, 2);
     [~, yl] = plotWindow(X, Y, inp);           % near-wall y window
 
@@ -27,7 +27,9 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
     if isfield(inp,'ro') && isfield(inp.ro,'bufferFrac') && ~isempty(inp.ro.bufferFrac)
         bufFrac = inp.ro.bufferFrac;
     end
-    fracs = [0, 0.5, 0.75, bufFrac];
+    % four stations evenly spaced from the inlet to the buffer start, so they
+    % stay ordered and inside the plotted (buffer-cut) domain for any bufFrac.
+    fracs = linspace(0, bufFrac, 4);
     cols  = min(Nx, max(1, round(fracs * Nx)));  cols(1) = 1;
     xs    = X(1, cols);
     ns    = numel(cols);
@@ -53,7 +55,7 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
         set(gca, 'TickLabelInterpreter', 'latex'); box on; grid on;
         xlabel('$u_{\mathrm{B}} / u_\infty$', 'Interpreter', 'latex');
         if j == 1; ylabel('$y / \delta_0$', 'Interpreter', 'latex'); end
-        title(sprintf('$x/\\delta_0 = %.0f$', xs(j)), 'Interpreter', 'latex');
+        title(sprintf('$S^{*}/\\delta_0 = %.0f$', xs(j)), 'Interpreter', 'latex');
         ylim(yl);
 
         % bottom row: perturbation |u~| for the selected modes

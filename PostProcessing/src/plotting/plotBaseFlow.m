@@ -19,7 +19,7 @@ function fig = plotBaseFlow(sBF, inp, savedir)
     nd = isfield(inp, 'loadMode') && strcmpi(inp.loadMode, 'loadFields');
 
     if nd
-        xlab = '$x / \delta_0$';  ylab = '$y / \delta_0$';
+        xlab = '$S^{*} / \delta_0$';  ylab = '$y / \delta_0$';
         catalog = { ...
             'u', '$u_{\mathrm{B}} / u_\infty$'; ...
             'v', '$v_{\mathrm{B}} / u_\infty$'; ...
@@ -45,7 +45,7 @@ function fig = plotBaseFlow(sBF, inp, savedir)
         warning('plotBaseFlow:noFields', 'No base-flow fields to plot.'); fig = []; return;
     end
 
-    X = sBF.x;  Y = sBF.y;
+    [X, Y] = plotCoords(sBF, inp);      % wall-fitted rectangle (unwraps curved TTCP wall)
     [xl, yl] = plotWindow(X, Y, inp);   % buffer-cut in x, near-wall window in y
 
     fig = figure('Name', 'Base flow', 'Color', 'w', ...

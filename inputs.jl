@@ -12,10 +12,10 @@ const inp = (
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = false,            # true to activate the bump
+        enabled = true,            # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
-        A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
+        A       = 2.0E-03,           # [m] height (positive=protrusion, negative=depression)
 
         # Sigmoidal shape parameters
         p       = 10,              # front steepness exponent (≥3 for C2)
@@ -51,8 +51,8 @@ const inp = (
         freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
-        gridXfactor = 3,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
-        gridYfactor = 2,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
+        gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
+        gridYfactor = 1,   # wall-normal: base (1) is 160 cells (120 bottom + 40 top)
 
         # Parallel
         nProcs = 8,
@@ -238,10 +238,11 @@ const inp = (
     PostProcessing = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
         loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
-        caseType       = "DFP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "sweptwing_flat_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        caseType       = "TTCP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
+        fieldsFile     = "m3j_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
         modeIdx        = Int[2,3],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all
         validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
+        valXcMin       = 17.0,                # lowest PIV station x/c [%] to include in the w-vs-PIV figure (0 -> all)
         ro = (
             loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
             bufferFrac   = 0.60,       # plot x-axis end fraction (buffer start); 1 -> full
