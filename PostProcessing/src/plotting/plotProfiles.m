@@ -9,8 +9,10 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
 % modes (inp.modeIdx; [] -> all). Stations are the inlet, 1/2, 3/4 and the buffer
 % start (fractions of the streamwise extent). The y-axis is a near-wall window.
 %
-% When inp.validation is true a second, DIMENSIONAL w-profile figure comparing
-% against the PIV Gen/Case data is added (see plotProfilesValidation).
+% When inp.validation is true, two further DIMENSIONAL w-profile figures comparing
+% against the PIV Gen/Case data are added (see plotProfilesValidation): a zoom on
+% the PIV stations inside inp.valXcZoom, and a broad view spanning the numerical
+% domain with the experimental overlay wherever a PIV station is close enough.
 %
 % Save behaviour: savedir non-empty -> PNGs written there (terminal/dispatcher);
 % empty/omitted -> figures left open for interactive inspection (direct MATLAB).
@@ -83,9 +85,10 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
         fprintf('plotProfiles: saved %s\n', out);
     end
 
-    % dimensional w-profile comparison vs PIV (only when validation is on)
+    % dimensional w-profile comparison vs PIV (only when validation is on).
+    % Returns up to two figures: the PIV-station zoom and the broad domain view.
     if isfield(inp, 'validation') && inp.validation
         fw = plotProfilesValidation(sBF, sPert, inp, savedir);
-        if ~isempty(fw); figs(end+1) = fw; end
+        if ~isempty(fw); figs = [figs, fw]; end
     end
 end

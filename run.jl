@@ -120,10 +120,20 @@ function write_pp_config(pp, task)
         println(io, "inp.fieldsFile     = $(mat_lit(pp.fieldsFile));")
         println(io, "inp.modeIdx        = $(mat_lit(pp.modeIdx));")
         println(io, "inp.validation     = $(mat_lit(pp.validation));")
+        println(io, "inp.valXcZoom      = $(mat_lit(pp.valXcZoom));")
         # pulled from the PreProcessing blocks (no PostProcessing duplication):
+        println(io, "inp.valPIV         = $(mat_lit(inp.VAL.valPIV));")
         println(io, "inp.valGen         = $(mat_lit(inp.VAL.Gen));")
         println(io, "inp.valCase        = $(mat_lit(inp.VAL.Case));")
         println(io, "inp.xInlet         = $(mat_lit(inp.DFP.xInlet));")
+        # TTCP airfoil geometry (from the TunnelCase block) — needed by the
+        # PostProcessing validation to map PIV x/c stations onto the curved-wall
+        # stability grid (inverse rigid transform: physical wall point -> x/c).
+        # Written for every case; only consumed by the TTCP validation branch.
+        println(io, "inp.airfoilChord    = $(mat_lit(inp.TTCP.tunnel.chord));")     # [m]
+        println(io, "inp.airfoilAlphaDeg = $(mat_lit(inp.TTCP.tunnel.alphaDeg));")  # [deg]
+        println(io, "inp.airfoilXCenter  = $(mat_lit(inp.TTCP.tunnel.xCenter));")   # [m]
+        println(io, "inp.airfoilYCenter  = $(mat_lit(inp.TTCP.tunnel.yCenter));")   # [m]
         println(io, "inp.ro.loadAnalysis = $(mat_lit(pp.ro.loadAnalysis));")
         println(io, "inp.ro.bufferFrac  = $(mat_lit(pp.ro.bufferFrac));")
         println(io, "inp.ro.yMax        = $(mat_lit(pp.ro.yMax));")
