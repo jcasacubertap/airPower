@@ -239,13 +239,25 @@ const inp = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
         loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
         caseType       = "TTCP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "m3j_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
-        modeIdx        = Int[2,3],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all
-        validation     = true,                # true: add dimensional w-profile comparison vs PIV (Gen/Case from the VAL block)
-        valXcMin       = 17.0,                # lowest PIV station x/c [%] to include in the w-vs-PIV figure (0 -> all)
+        fieldsFile     = "m3j_clean_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        modeIdx        = Int[2,2],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all.
+                                             #   Repeated entries are de-duplicated on load (importData), so a mode is
+                                             #   never drawn twice or listed twice in a legend.
+        plotUProfiles  = false,              # true: also draw profiles_u.png (non-dimensional u base flow + |u~|).
+                                             #   Off for now; the w-vs-PIV validation figures are unaffected.
+        validation     = true,                # true: add the dimensional w-profile figures vs PIV (Gen/Case from the VAL block).
+                                              #   profiles_w_validation.png       — zoom: stations ARE PIV stations, inside valXcZoom
+                                              #   profiles_w_validation_broad.png — broad: stations across the whole numerical
+                                              #     domain, with the PIV overlay wherever a station is close to a PIV one
+        valXcZoom      = [5.0, 25.0],        # zoom figure: PIV-station x/c window [%] ([] -> every station in the domain)
+        valShareX      = true,               # w-validation figures: one x-limit per ROW across all stations, so the
+                                             #   streamwise growth is readable. false -> per-panel autoscaling, which
+                                             #   resolves each station's shape but makes every panel look alike.
+        valYTop        = [],                 # w-validation figures: wall-distance limit [mm], shared by both rows.
+                                             #   [] -> auto (1.5 x the perturbation extent over the plotted stations)
         ro = (
             loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
-            bufferFrac   = 0.60,       # plot x-axis end fraction (buffer start); 1 -> full
+            bufferFrac   = 0.85,       # plot x-axis end fraction (buffer start); 1 -> full
             yMax         = 20.0,       # plot y-axis max (wall-normal, in y/delta0); [] -> near-wall fraction
         ),
     ),

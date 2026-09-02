@@ -34,6 +34,22 @@ function [sBF, sPert, inp] = importData(inp)
         inp.loadMode = 'loadBF';
     end
 
+    % Mode selection is de-duplicated ONCE, here, because inp flows from this
+    % single entry point to every plotter. A repeated index (inp.modeIdx =
+    % [2 2], say) otherwise draws the same mode twice — overplotted curves and a
+    % legend with two identical entries — in whichever plotter indexes modeIdx
+    % directly. 'stable' keeps the user's ordering, so the first listed mode
+    % still selects the fundamental in plotProfilesValidation.
+    if isfield(inp, 'modeIdx') && ~isempty(inp.modeIdx)
+        [u, keep] = unique(inp.modeIdx(:).', 'stable');
+        if numel(u) < numel(inp.modeIdx)
+            warning('importData:dupModeIdx', ...
+                    'inp.modeIdx had %d repeated entr(y/ies); using [%s].', ...
+                    numel(inp.modeIdx) - numel(u), num2str(u));
+        end
+        inp.modeIdx = u;  clear keep;
+    end
+
     sPert = [];
     switch inp.loadMode
         case 'loadBF'

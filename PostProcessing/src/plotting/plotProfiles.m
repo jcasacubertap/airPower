@@ -4,10 +4,11 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
 %   figs = plotProfiles(sBF, sPert, inp)            % show only
 %   figs = plotProfiles(sBF, sPert, inp, savedir)   % also save PNGs
 %
-% u-profiles (non-dimensional), ALWAYS: a 2-row grid, one column per station —
-% top row the base flow u_B, bottom row the perturbation |u~| for the selected
-% modes (inp.modeIdx; [] -> all). Stations are the inlet, 1/2, 3/4 and the buffer
-% start (fractions of the streamwise extent). The y-axis is a near-wall window.
+% u-profiles (non-dimensional), only when inp.plotUProfiles is true — OFF by
+% default for now: a 2-row grid, one column per station — top row the base flow
+% u_B, bottom row the perturbation |u~| for the selected modes (inp.modeIdx;
+% [] -> all). Stations are the inlet, 1/2, 3/4 and the buffer start (fractions
+% of the streamwise extent). The y-axis is a near-wall window.
 %
 % When inp.validation is true, two further DIMENSIONAL w-profile figures comparing
 % against the PIV Gen/Case data are added (see plotProfilesValidation): a zoom on
@@ -19,6 +20,30 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
 
     if nargin < 4; savedir = ''; end
     figs = gobjects(0);
+
+    if showU(inp)
+        figs(end+1) = uFigure(sBF, sPert, inp, savedir);
+    end
+
+    % dimensional w-profile comparison vs PIV (only when validation is on).
+    % Returns up to two figures: the PIV-station zoom and the broad domain view.
+    if isfield(inp, 'validation') && inp.validation
+        fw = plotProfilesValidation(sBF, sPert, inp, savedir);
+        if ~isempty(fw); figs = [figs, fw]; end
+    end
+end
+
+% whether to draw the non-dimensional u-profile figure (inp.plotUProfiles).
+% Default FALSE: profiles_u.png is off for now, the w-vs-PIV comparison is what
+% is being worked on. Set inp.plotUProfiles = true in inputs.jl to bring it back.
+function t = showU(inp)
+    t = false;
+    if isfield(inp, 'plotUProfiles') && ~isempty(inp.plotUProfiles)
+        t = logical(inp.plotUProfiles);
+    end
+end
+
+function f = uFigure(sBF, sPert, inp, savedir)
 
     [X, Y] = plotCoords(sBF, inp);             % wall-fitted rectangle (unwraps curved TTCP wall)
     Nx = size(X, 2);
@@ -76,19 +101,11 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
         end
     end
     sgtitle('\textrm{Wall-normal profiles of}\ \ $u$', 'Interpreter', 'latex');
-    figs(end+1) = f;
 
     if ~isempty(savedir)
         if ~exist(savedir, 'dir'); mkdir(savedir); end
         out = fullfile(savedir, 'profiles_u.png');
         exportgraphics(f, out, 'Resolution', 150);
         fprintf('plotProfiles: saved %s\n', out);
-    end
-
-    % dimensional w-profile comparison vs PIV (only when validation is on).
-    % Returns up to two figures: the PIV-station zoom and the broad domain view.
-    if isfield(inp, 'validation') && inp.validation
-        fw = plotProfilesValidation(sBF, sPert, inp, savedir);
-        if ~isempty(fw); figs = [figs, fw]; end
     end
 end

@@ -4,18 +4,34 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %   figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
 % Produces TWO figures, both with the same layout and styling (DeHNSSo = black
-% line with dot markers, Experimental (PIV) = red filled circles, w [m/s] vs wall
-% distance [m], LaTeX serif; a 2-row grid, one column per station -- top row the
-% base-flow w, bottom row the fundamental perturbation w RMS (|w~|/sqrt(2), the
-% z-RMS of a single mode, the same quantity the PIV reports)):
+% line, Experimental (PIV) = red line; BOTH carry one white-filled open circle
+% per sample point, so each curve shows its own wall-normal resolution -- the
+% black circles are the stability grid's y-nodes, the red ones the PIV
+% measurement points. w [m/s] vs wall distance in MILLIMETRES, LaTeX serif;
+% a 2 x nStation tiledlayout with one legend under
+% the whole figure -- top row the MEAN flow w (base flow + the (0,0) mean-flow
+% distortion of the stability solution, see meanW; the base flow alone is kept as
+% a grey dashed reference), bottom row the fundamental perturbation w RMS
+% (|w~|/sqrt(2), the z-RMS of a single mode, the same quantity the PIV reports)):
 %
 %   profiles_w_validation.png        ZOOM  -- the x/c window inp.valXcZoom
-%                                    (default [10 25] %). Fixed 4 mm y-range.
+%                                    (default [10 25] %).
 %
 %   profiles_w_validation_broad.png  BROAD -- the whole valid domain, inlet to
-%                                    outflow-buffer start. The y-range is shared
-%                                    and sized on the thickest delta_99 among the
-%                                    stations, since the BL grows over the domain.
+%                                    outflow-buffer start.
+%
+% Both figures auto-size their y-range (autoYTop: 1.5 x the perturbation extent
+% over their stations, capped by the grid; override with inp.valYTop [mm]) and
+% SHARE it across both rows, so the eye carries vertically from the mean flow to
+% the perturbation it drives.
+% They also share an x-limit along each row (inp.valShareX, default true), which
+% is what makes the streamwise growth readable station-to-station; set it false
+% for per-panel autoscaling if a single station's shape needs resolving.
+%
+% These are DIAGNOSTIC figures, so each perturbation panel carries its own
+% numbers: the peak w_rms of each, their ratio N/P (coloured amber past 10% and
+% red past 25% error) and the wall distance of each peak -- enough to tell an
+% amplitude deficit from a mode-shape error without leaving the figure.
 %
 % Both draw their stations the same way (see `stations`), which is what
 % inp.valPIV switches:
@@ -62,9 +78,11 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
     m = max(2, min(m, Nmode));                 % (0,0) has no PIV counterpart
 
     % ---- figure 1: zoom on the requested x/c window ----
+    % The y-range is auto-sized here too (it used to be a hard-coded 4 mm, which
+    % left two thirds of every panel empty); see autoYTop.
     Sz = stations(G, o, inp, xcZoom(inp));
     if ~isempty(Sz)
-        f = plotStations(Sz, sBF, sPert, o, inp, m, uref, 0.004);
+        f = plotStations(Sz, sBF, sPert, o, inp, m, uref, autoYTop(Sz, sPert, m, uref, inp));
         figs(end+1) = f;
         saveFig(f, savedir, 'profiles_w_validation.png', m, Sz);
     end
@@ -72,7 +90,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
     % ---- figure 2: broad view over the whole valid domain ----
     Sb = stations(G, o, inp, []);
     if ~isempty(Sb)
-        f = plotStations(Sb, sBF, sPert, o, inp, m, uref, autoYTop(Sb, sBF));
+        f = plotStations(Sb, sBF, sPert, o, inp, m, uref, autoYTop(Sb, sPert, m, uref, inp));
         figs(end+1) = f;
         saveFig(f, savedir, 'profiles_w_validation_broad.png', m, Sb);
     end
@@ -247,67 +265,223 @@ end
 
 % ======================================================================
 %  Plotting (shared by both figures)
+%
+%  Layout: a 2 x ns tiledlayout, top row the mean flow, bottom row the
+%  fundamental w RMS, ONE legend under the whole figure. Wall distance is in
+%  MILLIMETRES and both rows share the same y-limit (yTop, passed in metres),
+%  so the eye carries vertically from the mean flow to the perturbation it
+%  drives; only the left column keeps its y tick labels.
+%
+%  Both rows also share their x-limit ACROSS the stations (inp.valShareX,
+%  default true). Per-panel autoscaling made every station look alike and hid
+%  the streamwise growth, which is the thing being validated.
+%
+%  Diagnostic annotations (this is a diagnostic figure, not a paper figure):
+%    top row     max|dw| between HNS and PIV over the overlapping y-range
+%    bottom row  peak w_rms, HNS / PIV, their ratio N/P (coloured by how far
+%                it is from 1), and the peak wall distance of each. Together
+%                these separate an amplitude deficit from a mode-shape error
+%                without leaving the figure.
 % ======================================================================
-function fig = plotStations(S, sBF, sPert, o, inp, m, uref, yTop)
+function fig = plotStations(S, sBF, sPert, o, inp, m, uref, yTopM)
 
-    ns = numel(S);
-    cSolver = [0 0 0];  cExp = [0.75 0.08 0.08];
+    ns   = numel(S);
+    yTop = yTopM * 1e3;                              % plot in mm throughout
+    cSolver = [0 0 0];  cExp = [0.75 0.08 0.08];  cBase = [0.55 0.55 0.55];
 
-    % put the legend on the first station that actually has an experimental
-    % overlay (in the broad figure that is usually not the first column)
-    jLeg = find(~cellfun(@isempty, {S.korig}), 1);
-    if isempty(jLeg); jLeg = 1; end
+    % ---- pass 1: collect every curve, so the shared limits and the
+    %      annotations can be built before anything is drawn ----
+    D = collectStations(S, sBF, sPert, o, m, uref, yTop);
 
-    fig = figure('Color', 'w', 'Position', [40 60 330*ns 650]);
+    % shared x-limits per row (0 -> max over all stations, padded)
+    shareX = shareXLim(inp);
+    xlM = rowXLim(D, {'wMean','wBase','wMeanExp'}, D(1).yTop);
+    xlR = rowXLim(D, {'wRms','wRmsExp'},           D(1).yTop);
+
+    fig = figure('Color', 'w', 'Position', [40 60 300*ns 700]);
+    t = tiledlayout(fig, 2, ns, 'TileSpacing', 'compact', 'Padding', 'compact');
+    L = struct('solver', [], 'base', [], 'piv', []);
+
     for j = 1:ns
-        c = S(j).col;  k = S(j).korig;  yprof = S(j).n;   % wall distance [m], per column
+        d = D(j);
 
-        % ---- top: base-flow w ----
-        ax = subplot(2, ns, j); hold(ax, 'on');
-        h1 = plot(ax, sBF.w(:,c)*uref, yprof, '-', 'Color', cSolver, ...
-                  'LineWidth', 1.2, 'Marker', '.', 'MarkerSize', 7);
-        h2 = [];
-        if ~isempty(k)
-            wavg = local_rowmean(o.w_m_mean{k});  ye = double(o.y{k});  ye = ye(:,1)*1e-3;
-            h2 = plot(ax, wavg, ye, 'o', 'MarkerSize', 3.5, ...
-                      'MarkerFaceColor', cExp, 'MarkerEdgeColor', cExp);
+        % ---- top: mean flow w = base flow + mean-flow distortion (0,0) ----
+        % The PIV overlay is a MEAN velocity, so the like-for-like numerical
+        % quantity is w_B + w_(0,0), not w_B alone (see meanW).
+        ax = nexttile(t, j); hold(ax, 'on');
+        h = profCurve(ax, d.wMean, d.y, cSolver, 1.3, MS);
+        L.solver = firstOf(L.solver, h);
+        if ~isempty(d.wMeanExp)
+            L.piv = firstOf(L.piv, profCurve(ax, d.wMeanExp, d.yMeanExp, cExp, 1.1, MS));
         end
-        local_style(ax); ylim(ax, [0 yTop]);
-        xlabel(ax, '$w_{\mathrm{B}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
-        if j == 1; ylabel(ax, '$\mathrm{Wall\ distance\ [m]}$', 'Interpreter', 'latex'); end
-        % two lines: a single line is wide enough to run into the axes' 1e-3
-        % exponent label at the top left
-        title(ax, {sprintf('$x/c = %s\\%%$', S(j).label), ...
-                   sprintf('$(S^{*}/\\delta_0 = %.0f)$', S(j).sd0)}, ...
-              'Interpreter', 'latex', 'FontSize', 11);
-        if j == jLeg
-            local_legend(ax, h1, h2, 'northwest');
+        % base flow drawn LAST, so the dashed reference sits on top instead of
+        % being buried under the two marker trains it is meant to be read against
+        if d.hasMFD
+            h = plot(ax, d.wBase, d.y, '--', 'Color', cBase, 'LineWidth', 1.1);
+            L.base = firstOf(L.base, h);
         end
+        finishPanel(ax, j, yTop, shareX, xlM);
+        if d.hasMFD
+            xlabel(ax, '$w_{\mathrm{B}} + w_{(0,0)} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
+        else
+            xlabel(ax, '$w_{\mathrm{B}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
+        end
+        % single line now: in mm there is no 1e-3 exponent label to collide with
+        title(ax, sprintf('$x/c = %s\\%%$ \\ \\ $(S^{*}/\\delta_0 = %.0f)$', ...
+                          S(j).label, S(j).sd0), 'Interpreter', 'latex', 'FontSize', 11);
 
         % ---- bottom: fundamental perturbation w RMS ----
-        ax = subplot(2, ns, ns + j); hold(ax, 'on');
-        wrms = abs(squeeze(sPert.w(m,:,c))) / sqrt(2) * uref;
-        g1 = plot(ax, wrms, yprof, '-', 'Color', cSolver, ...
-                  'LineWidth', 1.2, 'Marker', '.', 'MarkerSize', 7);
-        fn = sprintf('w_pert_m_prof_rms_%02d', m-1);  yn = sprintf('y_prof_rms_%02d', m-1);
-        g2 = [];
-        if ~isempty(k) && isfield(o, fn) && isfield(o, yn)
-            g2 = plot(ax, double(o.(fn){k}), double(o.(yn){k})*1e-3, 'o', 'MarkerSize', 3.5, ...
-                      'MarkerFaceColor', cExp, 'MarkerEdgeColor', cExp);
+        ax = nexttile(t, ns + j); hold(ax, 'on');
+        profCurve(ax, d.wRms, d.y, cSolver, 1.3, MS);
+        if ~isempty(d.wRmsExp)
+            profCurve(ax, d.wRmsExp, d.yRmsExp, cExp, 1.1, MS);
         end
-        local_style(ax); ylim(ax, [0 yTop]);
+        finishPanel(ax, j, yTop, shareX, xlR);
         xlabel(ax, '$w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
-        if j == 1; ylabel(ax, '$\mathrm{Wall\ distance\ [m]}$', 'Interpreter', 'latex'); end
-        if j == jLeg
-            local_legend(ax, g1, g2, 'northeast');
+        annot(ax, peakText(d), ratioColor(d.ratio));
+    end
+
+    ylabel(t, '$\mathrm{Wall\ distance\ [mm]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    sharedLegend(t, L);
+end
+
+% ---- one pass over the stations: everything needed to draw and to annotate --
+function D = collectStations(S, sBF, sPert, o, m, uref, yTop)
+    fn = sprintf('w_pert_m_prof_rms_%02d', m-1);
+    yn = sprintf('y_prof_rms_%02d', m-1);
+    D  = repmat(emptyCurves(yTop), 1, numel(S));
+
+    for j = 1:numel(S)
+        c = S(j).col;  k = S(j).korig;
+        d = emptyCurves(yTop);
+        d.y = S(j).n(:) * 1e3;                       % wall distance [mm]
+        [d.wMean, d.wBase, d.hasMFD] = meanW(sBF, sPert, c, uref);
+        wr = abs(squeeze(sPert.w(m,:,c))) / sqrt(2) * uref;
+        d.wRms = wr(:);
+
+        if ~isempty(k)
+            ye = double(o.y{k});                     % PIV y is already in mm
+            d.yMeanExp = ye(:,1);
+            d.wMeanExp = local_rowmean(o.w_m_mean{k});
+            if isfield(o, fn) && isfield(o, yn)
+                we = double(o.(fn){k});  d.wRmsExp = we(:);
+                ye = double(o.(yn){k});  d.yRmsExp = ye(:);
+            end
+        end
+
+        % diagnostics, all restricted to the plotted window
+        [d.pkN, d.ypkN] = peakIn(d.wRms,    d.y,       yTop);
+        [d.pkP, d.ypkP] = peakIn(d.wRmsExp, d.yRmsExp, yTop);
+        if isfinite(d.pkN) && isfinite(d.pkP) && d.pkP > 0; d.ratio = d.pkN / d.pkP; end
+        D(j) = d;
+    end
+end
+
+function d = emptyCurves(yTop)
+    d = struct('y', [], 'yTop', yTop, 'hasMFD', false, ...
+               'wMean', [], 'wBase', [], 'wRms', [], ...
+               'wMeanExp', [], 'yMeanExp', [], 'wRmsExp', [], 'yRmsExp', [], ...
+               'pkN', NaN, 'ypkN', NaN, 'pkP', NaN, 'ypkP', NaN, 'ratio', NaN);
+end
+
+% ---- shared x-limit for one row: [0, max over all stations] + 5% headroom ----
+function xl = rowXLim(D, fields, yTop)
+    hi = 0;
+    for j = 1:numel(D)
+        yy = D(j).y;
+        for f = fields
+            v = D(j).(f{1});
+            if isempty(v); continue; end
+            % pair each curve with its own y (PIV curves have their own grid)
+            switch f{1}
+                case 'wMeanExp'; yv = D(j).yMeanExp;
+                case 'wRmsExp';  yv = D(j).yRmsExp;
+                otherwise;       yv = yy;
+            end
+            in = yv(:) <= yTop & isfinite(v(:));
+            if any(in); hi = max(hi, max(v(in))); end
         end
     end
+    if ~isfinite(hi) || hi <= 0; xl = []; return; end
+    xl = [0, 1.05*hi];
+end
+
+% ---- a profile curve: line + one open circle per SAMPLE POINT ----
+% Both HNS and PIV are drawn this way, so each curve shows its own wall-normal
+% resolution: the HNS circles are the stability grid's y-nodes, the PIV circles
+% its measurement points. The markers are white-filled with a coloured edge so a
+% dense cluster stays readable as individual points instead of a solid blob, and
+% so the two sets remain distinguishable where they overlap.
+function h = profCurve(ax, x, y, c, lw, ms)
+    ok = isfinite(x(:)) & isfinite(y(:));
+    h  = plot(ax, x(ok), y(ok), '-o', 'Color', c, 'LineWidth', lw, ...
+              'MarkerSize', ms, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', c);
+end
+
+% ---- common per-panel finishing: style, limits, tick-label suppression ----
+function finishPanel(ax, j, yTop, shareX, xl)
+    local_style(ax);
+    ylim(ax, [0 yTop]);
+    if shareX && ~isempty(xl); xlim(ax, xl); end
+    if j > 1; set(ax, 'YTickLabel', []); end
+end
+
+% ---- top-right annotation box (perturbation row only) ----
+function annot(ax, lines, col)
+    if isempty(lines); return; end
+    text(ax, 0.96, 0.97, lines, 'Units', 'normalized', ...
+         'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', ...
+         'Interpreter', 'latex', 'FontSize', 9, 'Color', col, ...
+         'BackgroundColor', 'w', 'Margin', 1.5);
+end
+
+% ---- bottom-row diagnostic text: peaks, ratio, peak heights ----
+function lines = peakText(d)
+    lines = {};
+    if ~isfinite(d.pkN); return; end
+    if isfinite(d.pkP)
+        lines = {sprintf('$\\hat{w}_{\\max}:\\ %.2f\\,/\\,%.2f$', d.pkN, d.pkP), ...
+                 sprintf('$N/P = %.2f$', d.ratio), ...
+                 sprintf('$y_{\\max}:\\ %.2f\\,/\\,%.2f$', d.ypkN, d.ypkP)};
+    else
+        lines = {sprintf('$\\hat{w}_{\\max} = %.2f$', d.pkN), ...
+                 sprintf('$y_{\\max} = %.2f$', d.ypkN)};
+    end
+end
+
+% ratio colouring: black within 10%, amber to 25%, red beyond
+function c = ratioColor(r)
+    c = [0 0 0];
+    if ~isfinite(r); return; end
+    e = abs(1 - r);
+    if     e > 0.25; c = [0.75 0.08 0.08];
+    elseif e > 0.10; c = [0.80 0.45 0.00];
+    end
+end
+
+% ---- one legend for the whole figure, under the tiles ----
+function sharedLegend(t, L)
+    hs   = {L.solver, L.base, L.piv};
+    labs = {'\textrm{HNS (DeHNSSo)}', '$w_{\mathrm{B}}$ \textrm{(base flow)}', ...
+            '\textrm{PIV}'};
+    keep = ~cellfun(@isempty, hs);
+    if ~any(keep); return; end
+    lg = legend([hs{keep}], labs(keep), 'Interpreter', 'latex', ...
+                'Orientation', 'horizontal', 'FontSize', 11);
+    lg.Layout.Tile = 'south';
+end
+
+function h = firstOf(h, cand)
+    if isempty(h); h = cand; end
 end
 
 function saveFig(fig, savedir, fname, m, S)
     if isempty(savedir); return; end
     if ~exist(savedir, 'dir'); mkdir(savedir); end
     out = fullfile(savedir, fname);
+    % drop the interactive axes toolbars: exportgraphics otherwise warns that
+    % they may appear in the image (they do not here, but the warning is noise)
+    set(findall(fig, 'Type', 'axes'), 'Toolbar', []);
     exportgraphics(fig, out, 'Resolution', 150);
     nPIV = nnz(~cellfun(@isempty, {S.korig}));
     fprintf(['plotProfilesValidation: saved %s (fundamental mode (0,%d), ', ...
@@ -322,6 +496,13 @@ end
 % stations (columns) per figure
 function n = NSTA
     n = 6;
+end
+
+% sample-point marker size, the SAME in both rows: the circles carry a meaning
+% (one per grid node / measurement point), so a size difference between the rows
+% would read as a difference in the data rather than in the styling.
+function s = MS
+    s = 3;
 end
 
 % whether experimental data drives the station choice (inp.valPIV, from the
@@ -366,39 +547,128 @@ function ib = colAt(G, frac)
     ib = min(G.Nx, max(2, round(frac * G.Nx)));
 end
 
-% shared y-limit for the broad figure: 1.5 x the thickest boundary layer among
-% the plotted stations (u-based delta_99), capped by the grid height.
-function yTop = autoYTop(S, sBF)
-    d99 = 0;  nMax = 0;
-    for j = 1:numel(S)
-        n = S(j).n;  u = abs(sBF.u(:, S(j).col));
-        nMax = max(nMax, max(n));
-        ue = max(u);
-        if ~isfinite(ue) || ue <= 0; continue; end
-        % rows run free-stream (1) -> wall (end), so the LAST row still at
-        % 0.99*ue is the boundary-layer edge
-        i99 = find(u >= 0.99*ue, 1, 'last');
-        if ~isempty(i99); d99 = max(d99, n(i99)); end
+% Shared y-limit (BOTH rows, BOTH figures), as a wall distance [m].
+%
+% Sized on the PERTURBATION extent: 1.5 x the highest point at which w_rms is
+% still 5% of its station peak, maxed over the plotted stations and capped by
+% the grid height. inp.valYTop [mm] overrides it outright.
+%
+% Deliberately NOT a delta_99 criterion. The obvious one (deepest row still at
+% 99% of the column's max u) is wrong for this geometry: near the leading edge
+% the outer flow is still accelerating with height, so max(u) sits at the top of
+% the domain and the criterion returns where the INVISCID profile flattens, not
+% the boundary-layer edge -- it gave 4 mm at x/c = 12% against a profile that
+% plateaus by 1.3 mm, which is what used to inflate the broad figure to 6 mm.
+% The perturbation extent needs no edge detection and is what both rows are
+% actually about.
+function yTop = autoYTop(S, sPert, m, uref, inp)
+    if isfield(inp, 'valYTop') && ~isempty(inp.valYTop)
+        yTop = double(inp.valYTop) * 1e-3;  return;       % inputs.jl gives mm
     end
-    yTop = min(1.5*d99, nMax);
+    ext = 0;  nMax = 0;
+    for j = 1:numel(S)
+        n = S(j).n;
+        nMax = max(nMax, max(n));
+        wr = abs(squeeze(sPert.w(m,:,S(j).col))) / sqrt(2) * uref;
+        wr = wr(:);
+        pk = max(wr);
+        if ~isfinite(pk) || pk <= 0; continue; end
+        % rows run free-stream (1) -> wall (end), so n DESCENDS with the row
+        % index: the FIRST row above the threshold is the highest such point.
+        i = find(wr >= 0.05*pk, 1, 'first');
+        if ~isempty(i); ext = max(ext, n(i)); end
+    end
+    yTop = min(1.5*ext, nMax);
     if ~isfinite(yTop) || yTop <= 0; yTop = nMax; end
+end
+
+% peak of a profile and the wall distance where it occurs, restricted to the
+% plotted window (so free-stream noise cannot win the max)
+function [pk, ypk] = peakIn(v, y, yTop)
+    pk = NaN;  ypk = NaN;
+    if isempty(v); return; end
+    v = v(:);  y = y(:);
+    in = y <= yTop & isfinite(v);
+    if ~any(in); return; end
+    [pk, i] = max(v(in));
+    yy = y(in);  ypk = yy(i);
+end
+
+% whether the stations share one x-limit per row (inp.valShareX, default true).
+% Shared limits make the streamwise growth readable; false restores per-panel
+% autoscaling, which resolves each station's shape at the cost of that.
+function t = shareXLim(inp)
+    t = true;
+    if isfield(inp, 'valShareX') && ~isempty(inp.valShareX)
+        t = logical(inp.valShareX);
+    end
+end
+
+% ======================================================================
+%  Mean flow at one column: base flow + mean-flow distortion (mode (0,0)).
+%
+%  Why: the PIV overlay (o.w_m_mean) is a MEASURED mean velocity, so it
+%  already contains whatever mean-flow distortion the disturbance drove. The
+%  like-for-like numerical quantity is therefore w_B + w_(0,0), not w_B alone
+%  -- the base flow the HNS was linearized about knows nothing about the MFD.
+%
+%  Amplitude convention -- no factor of 2 here, and that is deliberate:
+%  DeHNSSo (src/io/postprocess.m) stores A = 2|u_max| for the oscillatory
+%  modes, because u'(z) = 2|a|cos(bz) peaks at 2|a|, but A = |u_max| for the
+%  MFD, which is constant in z. importData folds the FULL A into sPert for
+%  every mode alike, so row (0,0) already IS the physical distortion field and
+%  is added straight to the base flow.
+%
+%  Row 1 is the (0,0) mode: postprocess.m deletes the conjugate half, leaving
+%  (0,0) first. We still verify it via beta = omega = 0 when those vectors are
+%  present, and fall back to the base flow alone if they say otherwise.
+%
+%  Returns wTot (Ny x 1, [m/s]), wBase (same, base flow alone) and hasMFD.
+% ======================================================================
+function [wTot, wBase, hasMFD] = meanW(sBF, sPert, c, uref)
+    wBase  = sBF.w(:,c) * uref;
+    wTot   = wBase;
+    hasMFD = false;
+    if isempty(sPert) || ~isfield(sPert,'w') || size(sPert.w,1) < 1; return; end
+
+    % (0,0) identification: zero spanwise wavenumber AND zero frequency.
+    for f = {'beta','omega'}
+        if isfield(sPert, f{1}) && ~isempty(sPert.(f{1})) && sPert.(f{1})(1) ~= 0
+            warnOnce('plotProfilesValidation:noMFD', ...
+                     ['Mode row 1 has %s = %g, not 0 — it is not the (0,0) ', ...
+                      'mean-flow distortion. Plotting the base flow alone.'], ...
+                     f{1}, sPert.(f{1})(1));
+            return;
+        end
+    end
+
+    wm = squeeze(sPert.w(1,:,c));  wm = wm(:);          % Ny x 1, physical MFD
+    % A zero-beta, zero-omega mode of a real operator is real; keep only the
+    % real part and flag it if the imaginary part is not round-off.
+    aIm = max(abs(imag(wm)));  aRe = max(abs(real(wm)));
+    if aIm > 1e-6 * max(aRe, eps)
+        warnOnce('plotProfilesValidation:complexMFD', ...
+                 ['(0,0) mean-flow distortion has a non-negligible imaginary ', ...
+                  'part (|Im|/|Re| = %.2g); using real() — check the mode ordering.'], ...
+                 aIm/max(aRe, eps));
+    end
+    wTot   = wBase + real(wm) * uref;
+    hasMFD = true;
+end
+
+% --- warn at most once per identifier per MATLAB session (12 panels/figure) ---
+function warnOnce(id, fmt, varargin)
+    persistent seen
+    if isempty(seen); seen = containers.Map('KeyType','char','ValueType','logical'); end
+    if isKey(seen, id); return; end
+    seen(id) = true;
+    warning(id, fmt, varargin{:});
 end
 
 % --- z-average a (ny x nz) PIV field to a 1-D profile, ignoring NaN/0 ---
 function wavg = local_rowmean(W)
     W = double(W);  W(W == 0) = NaN;
     wavg = mean(W, 2, 'omitnan');
-end
-
-% --- legend with the experimental entry only when there is one ---
-function local_legend(ax, hNum, hExp, loc)
-    if isempty(hExp)
-        legend(ax, hNum, {'\textrm{DeHNSSo}'}, ...
-               'Interpreter', 'latex', 'Location', loc);
-    else
-        legend(ax, [hNum hExp], {'\textrm{DeHNSSo}','\textrm{Experimental}'}, ...
-               'Interpreter', 'latex', 'Location', loc);
-    end
 end
 
 % --- common axis styling (serif/LaTeX, grid, box) ---
