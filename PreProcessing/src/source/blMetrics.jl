@@ -5,12 +5,29 @@
 # For each suction-side wall face exported by the writeMidPlane function
 # object, compute (d99, dstar, Theta) and the freestream speed U_e at that
 # station, and write postProcessing/BLQuantities.csv (columns x, s, xi, Ue,
-# d99, dstar, Theta — x is the global, post-AoA-rotation wall-face x in
-# metres (same convention as postProcessing/wallQuantities.csv), s is the
-# arclength along the upper surface measured from xi=0, and xi is the chord
-# fraction (x/c) used to plot vs the airfoil-chord coordinate).
+# d99, dstar, Theta, We, d99_w, dstar_w, Theta_w — x is the global, post-AoA-
+# rotation wall-face x in metres (same convention as
+# postProcessing/wallQuantities.csv), s is the arclength along the upper
+# surface measured from xi=0, and xi is the chord fraction (x/c) used to plot
+# vs the airfoil-chord coordinate).
 # Each mid-plane cell is Voronoi-assigned to its nearest wall face to build
 # the wall-normal column.
+#
+# Two profiles are reduced on that same column, with the same integrator
+# (compute_bl_integrals), the same no-slip wall anchor and the same
+# exportHeight truncation — they differ only in the edge velocity:
+#   u-based (Ue, d99, dstar, Theta)          — u_tan = u·t̂ projected onto the
+#       surface tangent; U_e from blMetrics.method (see below).
+#   w-based (We, d99_w, dstar_w, Theta_w)    — the spanwise velocity, which is
+#       normal to the mid-plane and so needs no projection. W_e = W_inf
+#       (Upinlet.freeStreamVelocitySpanwise) at EVERY station, independent of
+#       blMetrics.method: for a spanwise-invariant swept configuration
+#       ∂p/∂z = 0, so the inviscid spanwise velocity is exactly W_inf. The
+#       method switch is not reused because pressureBernoulli yields a speed
+#       magnitude rather than a component, and the vorticity integrals would
+#       require ω_x, ω_y (∂w/∂n = n_y·ω_x − n_x·ω_y), which writeMidPlane does
+#       not export. `We` is written as a constant column so the CSV records
+#       the normalisation it used.
 #
 # The freestream method is selected by `blMetrics.method` in
 # constant/inputParam. Currently supported:
@@ -477,6 +494,9 @@ function compute_bl_all_methods(case_dir::AbstractString)
     col_omz   = findfirst(==("omz"), hdr)
     col_omz === nothing && error(
         "midPlane.csv has no `omz` column — re-run runPostProcess with the OF-side changes")
+    col_w     = findfirst(==("w"), hdr)
+    col_w === nothing && error(
+        "midPlane.csv has no `w` column — cannot build the spanwise-velocity profile")
     xw, yw    = read_wall_coords(wallCoords)
     nW        = length(xw)
 
@@ -488,6 +508,20 @@ function compute_bl_all_methods(case_dir::AbstractString)
     p_wall = wq_data[:, 3]                    # col 3 = p in (x,s,p,tau,yPlus)
     Uinf   = up["freeStreamVelocityStreamwise"]
     Uinf2  = Uinf * Uinf
+
+    # Spanwise edge velocity for the w-profile metrics.
+    #
+    # Unlike U_e, this needs no edge-detection method and deliberately ignores
+    # blMetrics.method. For a spanwise-invariant (infinite-swept) configuration
+    # ∂p/∂z = 0, so the w-momentum equation carries no pressure term and reduces
+    # to pure convection–diffusion; the inviscid spanwise velocity is therefore
+    # exactly W_inf at every station. Two further reasons not to reuse the
+    # method switch here: `pressureBernoulli` recovers a speed magnitude, not a
+    # component; and the vorticity integrals would need ω_x, ω_y (∂w/∂n =
+    # n_y·ω_x − n_x·ω_y), which writeMidPlane does not export — integrating
+    # ∂w/∂n from the w column instead telescopes to w(top), i.e. it collapses
+    # into `fixedHeight` and adds nothing.
+    Winf = up["freeStreamVelocitySpanwise"]
 
     # Geometry + wall-face parameterisation
     geom    = build_geom(up)
@@ -506,6 +540,8 @@ function compute_bl_all_methods(case_dir::AbstractString)
     xs = @view data[:,1]; ys = @view data[:,2]
     us = @view data[:,4]; vs = @view data[:,5]
     ωs = @view data[:, col_omz]
+    wsp = @view data[:, col_w]      # spanwise velocity: out of the mid-plane,
+                                    # so it needs no tangent projection
 
     # Per-method arrays
     Ue_vT  = fill(NaN, nW); d99_vT = fill(NaN, nW); dst_vT = fill(NaN, nW); th_vT  = fill(NaN, nW)
@@ -514,17 +550,22 @@ function compute_bl_all_methods(case_dir::AbstractString)
     Ue_f   = fill(NaN, nW); d99_f  = fill(NaN, nW); dst_f  = fill(NaN, nW); th_f   = fill(NaN, nW)
     Ue_b   = fill(NaN, nW); d99_b  = fill(NaN, nW); dst_b  = fill(NaN, nW); th_b   = fill(NaN, nW)
 
+    # w-profile metrics — ONE set, not five: W_e = W_inf is method-independent.
+    d99_w  = fill(NaN, nW); dst_w  = fill(NaN, nW); th_w   = fill(NaN, nW)
+
     for j in 1:nW
         nxj, nyj, txj, tyj = frames[j]
         Pjx, Pjy = xw[j], yw[j]
         idx = buckets[j]; K = length(idx)
         n_col = Vector{Float64}(undef, K)
         u_col = Vector{Float64}(undef, K)
+        w_col = Vector{Float64}(undef, K)
         ω_col = Vector{Float64}(undef, K)
         @inbounds for (k, i) in enumerate(idx)
             dx = xs[i] - Pjx; dy = ys[i] - Pjy
             n_col[k] = dx*nxj + dy*nyj
             u_col[k] = us[i]*txj + vs[i]*tyj
+            w_col[k] = wsp[i]            # already normal to the mid-plane
             ω_col[k] = ωs[i]
         end
         # Drop the wall-extrap row (n ≈ 0): its ω_z is the extrapolated value
@@ -534,6 +575,7 @@ function compute_bl_all_methods(case_dir::AbstractString)
         nperm  = sortperm(view(n_col, keep))
         n_int  = n_col[keep][nperm]
         u_int  = u_col[keep][nperm]
+        w_int  = w_col[keep][nperm]
         omz_int = ω_col[keep][nperm]
 
         Ue_vT[j]  = compute_ue(n_int, u_int, omz_int, "vorticityIntegralTrapezoidal")
@@ -547,13 +589,19 @@ function compute_bl_all_methods(case_dir::AbstractString)
         d99_m[j],  dst_m[j],  th_m[j]  = compute_bl_integrals(n_int, u_int, Ue_m[j];  max_n=expHeightM)
         d99_f[j],  dst_f[j],  th_f[j]  = compute_bl_integrals(n_int, u_int, Ue_f[j];  max_n=expHeightM)
         d99_b[j],  dst_b[j],  th_b[j]  = compute_bl_integrals(n_int, u_int, Ue_b[j];  max_n=expHeightM)
+
+        # Spanwise profile — same integrator, same wall anchor (no-slip gives
+        # w(0)=0 exactly as u_tan(0)=0), same δ99-bounded integration and the
+        # same exportHeight truncation. Only the edge velocity differs.
+        d99_w[j],  dst_w[j],  th_w[j]  = compute_bl_integrals(n_int, w_int, Winf;    max_n=expHeightM)
     end
 
     return (; nW, xw, ss, xis, perm, method,
             Ue_vT, Ue_vM, Ue_m, Ue_f, Ue_b,
             d99_vT, d99_vM, d99_m, d99_f, d99_b,
             dst_vT, dst_vM, dst_m, dst_f, dst_b,
-            th_vT, th_vM, th_m, th_f, th_b)
+            th_vT, th_vM, th_m, th_f, th_b,
+            Winf, d99_w, dst_w, th_w)
 end
 
 """
@@ -571,6 +619,7 @@ function main(case_dir::AbstractString)
     d99_vT, d99_vM, d99_m, d99_f, d99_b = r.d99_vT, r.d99_vM, r.d99_m, r.d99_f, r.d99_b
     dst_vT, dst_vM, dst_m, dst_f, dst_b = r.dst_vT, r.dst_vM, r.dst_m, r.dst_f, r.dst_b
     th_vT, th_vM, th_m, th_f, th_b      = r.th_vT, r.th_vM, r.th_m, r.th_f, r.th_b
+    Winf, d99_w, dst_w, th_w            = r.Winf, r.d99_w, r.dst_w, r.th_w
 
     # Production output (configured method) — sorted by xi
     sel = method == "vorticityIntegralTrapezoidal" ? (Ue_vT, d99_vT, dst_vT, th_vT) :
@@ -582,11 +631,12 @@ function main(case_dir::AbstractString)
 
     outFile = joinpath(case_dir, "postProcessing", "BLQuantities.csv")
     open(outFile, "w") do io
-        println(io, "x,s,xi,Ue,d99,dstar,Theta")
+        println(io, "x,s,xi,Ue,d99,dstar,Theta,We,d99_w,dstar_w,Theta_w")
         for k in 1:nW
             j = perm[k]
-            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
-                    xw[j], ss[j], xis[j], Ue_sel[j], d99_sel[j], dst_sel[j], th_sel[j])
+            @printf(io, "%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g,%.10g\n",
+                    xw[j], ss[j], xis[j], Ue_sel[j], d99_sel[j], dst_sel[j], th_sel[j],
+                    Winf, d99_w[j], dst_w[j], th_w[j])
         end
     end
 
