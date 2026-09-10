@@ -25,6 +25,15 @@ function fig = plotBaseFlow(sBF, inp, savedir)
             'v', '$v_{\mathrm{B}} / u_\infty$'; ...
             'w', '$w_{\mathrm{B}} / u_\infty$'; ...
             'p', '$p_{\mathrm{B}} / (\rho\, u_\infty^2)$'};
+    elseif isfield(sBF, 's')
+        % loadBF on the body-fitted TTCP mesh: coordinates are wall-fitted and
+        % dimensional. S* is measured from the first exported station, not the LE.
+        xlab = '$S^{*} \; [\mathrm{m}]$';  ylab = '$n \; [\mathrm{m}]$';
+        catalog = { ...
+            'u', '$u_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
+            'v', '$v_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
+            'w', '$w_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
+            'p', '$p_{\mathrm{B}} \; [\mathrm{m^2/s^2}]$'};
     else
         xlab = '$x \; [\mathrm{m}]$';  ylab = '$y \; [\mathrm{m}]$';
         catalog = { ...
@@ -34,10 +43,16 @@ function fig = plotBaseFlow(sBF, inp, savedir)
             'p', '$p_{\mathrm{B}} \; [\mathrm{m^2/s^2}]$'};
     end
 
+    % Grid-size reference: whichever coordinate array this loader supplied.
+    if     isfield(sBF, 'x'); gsz = size(sBF.x);   % rectilinear grid
+    elseif isfield(sBF, 's'); gsz = size(sBF.s);   % wall-fitted grid
+    else;                     gsz = [0 0];
+    end
+
     have = false(size(catalog,1),1);
     for k = 1:size(catalog,1)
         f = catalog{k,1};
-        have(k) = isfield(sBF, f) && ~isempty(sBF.(f)) && isequal(size(sBF.(f)), size(sBF.x));
+        have(k) = isfield(sBF, f) && ~isempty(sBF.(f)) && isequal(size(sBF.(f)), gsz);
     end
     catalog = catalog(have,:);
     nF = size(catalog,1);

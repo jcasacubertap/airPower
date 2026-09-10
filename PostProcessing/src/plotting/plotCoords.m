@@ -19,6 +19,14 @@ function [X, Y] = plotCoords(sBF, inp)
 %
 % Row convention (set by importData): (1,:) = free-stream, (end,:) = wall.
 
+    % A loader that already returns a wall-fitted pair (loadBF on the TTCP
+    % body-fitted mesh gives .s = arc length along the wall, .n = wall-normal
+    % distance) needs no unwrapping here — it is built the same way.
+    if isfield(sBF,'s') && isfield(sBF,'n') && isequal(size(sBF.s), size(sBF.n))
+        X = sBF.s;  Y = sBF.n;
+        return;
+    end
+
     if ~isfield(inp,'caseType') || ~strcmpi(inp.caseType, 'TTCP')
         X = sBF.x;  Y = sBF.y;   % DFP (and any already-wall-fitted grid)
         return;

@@ -3,21 +3,40 @@ using MAT
 """
     _find_matlab() → String | nothing
 
-Locate a MATLAB executable. Tries `PATH` first, then the standard macOS
-application bundles (newest version wins).
+Locate a MATLAB executable, using the same ladder as the top-level dispatcher
+(`run.jl`): `$AIRPOWER_MATLAB`, then `PATH`, then the standard install
+directories (newest release wins). The last step is what saves a default macOS
+setup, where `matlab` is typically a shell alias and so cannot be spawned.
 """
 function _find_matlab()
+    override = get(ENV, "AIRPOWER_MATLAB", "")
+    isempty(override) || return isfile(override) ? override : nothing
+
     exe = Sys.which("matlab")
     exe !== nothing && return exe
-    candidates = sort(filter(isfile,
-        [joinpath(d, "bin", "matlab")
-         for d in glob_app_dirs()]); rev=true)
-    return isempty(candidates) ? nothing : candidates[1]
+
+    # Sort on the release tag, not the whole path: with two install roots
+    # present, path order would let the root name outrank the release.
+    found = [(m === nothing ? "" : String(m.captures[1]), exe)
+             for (m, exe) in ((match(r"R(\d{4}[ab])", basename(d)),
+                               joinpath(d, "bin", "matlab")) for d in glob_app_dirs())
+             if isfile(exe)]
+    isempty(found) && return nothing
+    return last(first(sort(found; by = first, rev = true)))
 end
 
-glob_app_dirs() = isdir("/Applications") ?
-    [joinpath("/Applications", d) for d in readdir("/Applications")
-     if startswith(d, "MATLAB") && endswith(d, ".app")] : String[]
+function glob_app_dirs()
+    roots = Sys.isapple() ? ["/Applications"] : ["/usr/local/MATLAB", "/opt/MATLAB"]
+    dirs = String[]
+    for r in roots
+        isdir(r) || continue
+        for d in (try readdir(r) catch; String[] end)
+            Sys.isapple() && !(startswith(d, "MATLAB") && endswith(d, ".app")) && continue
+            push!(dirs, joinpath(r, d))
+        end
+    end
+    return dirs
+end
 
 """
     _ue_poly(x, p) → Float64

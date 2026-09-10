@@ -24,19 +24,10 @@ function plotReynoldsOrrDecomp(sRO, sBF, inp, savedir)
     end
     if isempty(sel); sel = 1:size(sRO.I1, 3); end
 
-    % near-wall y-focus + x-axis ending at the buffer start (as in plotReynoldsOrrProd)
-    y0 = min(Y(:));
-    if isfield(inp,'ro') && isfield(inp.ro,'yMax') && ~isempty(inp.ro.yMax)
-        yTop = y0 + inp.ro.yMax;
-    else
-        yTop = y0 + 0.30 * (max(Y(:)) - y0);
-    end
-    bufFrac = 0.85;
-    if isfield(inp, 'ro') && isfield(inp.ro, 'bufferFrac') && ~isempty(inp.ro.bufferFrac)
-        bufFrac = inp.ro.bufferFrac;
-    end
-    Nx = size(X, 2);  ib = min(Nx, max(2, round(bufFrac * Nx)));
-    x0 = min(X(:));   xEnd = X(1, ib);
+    % Same shared window as plotReynoldsOrrProd and every other figure.
+    [xl, yl] = plotWindow(X, Y, inp);
+    x0 = xl(1);  xEnd = xl(2);
+    y0 = yl(1);  yTop = yl(2);
 
     flds = {'I1', 'I2', 'I3', 'I4'};      % tiles: I1 I2 / I3 I4
     labs = {'I_1', 'I_2', 'I_3', 'I_4'};

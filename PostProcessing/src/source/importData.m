@@ -11,12 +11,32 @@ function [sBF, sPert, inp] = importData(inp)
 %                   so it differs from the midPlane base flow of 'loadBF'.
 %
 % Returns sBF with fields (Ny x Nx matrices):
-%   sBF.x, sBF.y           meshgrid coordinates
 %   sBF.u, sBF.v, sBF.w    velocity components
 %   sBF.p                  pressure          (loadBF; absent in loadFields)
 %   sBF.omz                z-vorticity       (loadBF, if present in source)
 %   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients (loadFields: read from source;
-%                          loadBF: computed here from u,v,w via differentiateField)
+%                          loadBF/DFP: computed here via differentiateField;
+%                          loadBF/TTCP: NOT provided — see assembleBodyFitted)
+%
+% Coordinates come in one of two shapes, because the two sources hold the base
+% flow on different kinds of grid:
+%   sBF.x, sBF.y   rectilinear grids (loadFields, and loadBF on the DFP mesh),
+%                  i.e. Cartesian x and y
+%   sBF.s, sBF.n   wall-fitted pair on the body-fitted TTCP mesh (loadBF):
+%                  s = arc length along the wall, 0 at the first exported station
+%                  (the S* of the figures); n = wall-normal distance. Named (s,n)
+%                  rather than (s,y) so that y NEVER means anything but Cartesian
+%                  y, whichever grid is loaded.
+%
+% sBF.geom (loadBF on the body-fitted mesh) holds the physical Cartesian cell
+% centres X, Y [m], co-registered with everything else. They are kept out of the
+% top level because nothing plots against them — the figures all use (s,n) — and
+% four coordinate matrices side by side only invites plotting the flow against
+% the wrong pair. They are kept AT ALL because (X,Y) -> (s,n) is one-way: it
+% discards where the wall is and how it is oriented, so the geometry cannot be
+% rebuilt from (s,n). It is what the wall shape (including any modulation) lives
+% in, what maps a station to x/c, and what the metric terms for curvilinear
+% gradients are built from.
 %
 % sPert (loadFields only) carries all perturbation modes:
 %   sPert.u,v,w,p          (Nmode x Ny x Nx) complex, PHYSICAL PEAK fields
@@ -116,6 +136,16 @@ function [sBF, sPert] = orientFreestreamToWall(sBF, sPert)
             sBF.(flds{i}) = flipud(sBF.(flds{i}));
         end
     end
+    % Nested geometry describes the same cells, so it flips with them or the two
+    % stop being co-registered — the wall row would no longer line up with n = 0.
+    if isfield(sBF, 'geom')
+        gf = fieldnames(sBF.geom);
+        for i = 1:numel(gf)
+            if isequal(size(sBF.geom.(gf{i})), [Ny, Nx])
+                sBF.geom.(gf{i}) = flipud(sBF.geom.(gf{i}));
+            end
+        end
+    end
     if ~isempty(sPert)
         pf = fieldnames(sPert);
         for i = 1:numel(pf)
@@ -128,11 +158,20 @@ function [sBF, sPert] = orientFreestreamToWall(sBF, sPert)
     fprintf('importData: flipped wall-normal rows -> free-stream (1,:), wall (end,:)\n');
 end
 
-% --- loadBF: read a PreProcessing case's midPlane and arrange it on a meshgrid ---
+% --- loadBF: read a PreProcessing case's midPlane and put it back on a grid ---
 % Reads <case>/postProcessing/midPlane.{bin,csv} from the case selected by
 % inp.caseType. If both .bin and .csv are present, .bin wins. Also sets
 % inp.wallExtrap depending on whether the file contained wall-extrapolation
 % rows (u=v=w=0 added at wall face centres by the writeMidPlane function object).
+%
+% How the rows go back on a grid depends on the mesh, and NEITHER path
+% interpolates — every value returned is the cell value OpenFOAM wrote:
+%   DFP  — rectilinear: the unique x and unique y ARE the grid lines, so the
+%          rows scatter straight into a meshgrid    (assembleRectilinear)
+%   TTCP — body-fitted C-grid: every cell carries its own (x,y) even though the
+%          (i,j) topology is perfect, so unique x/y sees ~N distinct values in
+%          each direction and a meshgrid is meaningless. The grid is recovered
+%          from the mesh ordering instead          (assembleBodyFitted)
 function [sBF, inp] = importFromPreProc(inp)
 
     caseDir = caseDirFor(inp);
@@ -184,12 +223,189 @@ function [sBF, inp] = importFromPreProc(inp)
         end
     end
 
-    % --- arrange on a 2D meshgrid ---
+    switch upper(inp.caseType)
+        case 'TTCP'
+            sBF = assembleBodyFitted(T, isWall);
+        otherwise
+            sBF = assembleRectilinear(T, tol);
+    end
+end
+
+% --- TTCP: rebuild the body-fitted C-grid from the mesh ordering -----------
+% Returns, all Ny x Nx with row 1 = wall (orientFreestreamToWall then flips the
+% whole set so row 1 is free-stream and row end the wall):
+%   .s            streamwise arc length along the wall, 0 at the first exported
+%                 station — the S* the figures are labelled with              [m]
+%   .n            wall-normal distance measured up each grid column from the wall [m]
+%   .geom.X/.Y    physical Cartesian cell centres [m] (same role as StabGrid.X/.Y),
+%                 kept aside because no figure plots against them
+%   .u .v .w .p .omz   the exported fields
+%
+% Base-flow gradients are deliberately NOT computed here. On a body-fitted grid
+% a row step changes both x and y, so differentiateField(u, X, 2) returns
+% u_xi / x_xi rather than du/dx; correct metric terms are a separate change.
+% Nothing consumes loadBF gradients today (loadBF returns sPert = [], and run.m
+% refuses reynoldsOrrProdTerms without perturbation data).
+function sBF = assembleBodyFitted(T, isWall)
+
+    Tw = T(isWall,  :);      % wall-face rows (u=v=w=0), one per station
+    Ti = T(~isWall, :);      % interior cells
+    if height(Ti) < 3
+        error('importData:noInteriorCells', ...
+              'midPlane holds %d interior cell(s) — nothing to assemble.', height(Ti));
+    end
+
+    % --- 1. cut the interior rows into streamwise sweeps ---
+    % writeMidPlane appends cells in mesh order, which on the C-grid means one
+    % sweep along the wall per wall-normal level. Neighbours inside a sweep sit
+    % one streamwise spacing apart; the step from the end of a sweep back to the
+    % start of the next spans the whole sweep, ~2 orders of magnitude more. That
+    % jump marks the boundary, so no knowledge of the block layout is needed.
+    step = hypot(diff(Ti.x), diff(Ti.y));
+    mstep = median(step);
+    if ~(mstep > 0)
+        error('importData:degenerateOrder', ...
+              'Cannot find streamwise sweeps: median cell-to-cell step is %g.', mstep);
+    end
+    brk  = find(step > 10 * mstep);
+    sBeg = [1; brk + 1];
+    sEnd = [brk; height(Ti)];
+    sLen = sEnd - sBeg + 1;
+
+    Nxb = mode(sLen);        % stations per sweep = streamwise cells in one block
+
+    % --- 2. drop partial sweeps at the exportHeight ceiling ---
+    % exportHeight cuts the slab at a fixed wall-normal distance, so a handful of
+    % columns can carry one extra cell right at the cut. Those arrive as a short
+    % sweep; keeping them would add a row that is almost entirely NaN, so they go
+    % and the assembled grid stays exactly rectangular.
+    keep = (sLen == Nxb);
+    if any(~keep)
+        fprintf(['importData: dropped %d cell(s) in %d partial sweep(s) at the ' ...
+                 'exportHeight ceiling (grid kept rectangular)\n'], ...
+                sum(sLen(~keep)), nnz(~keep));
+    end
+    sBeg = sBeg(keep);  sEnd = sEnd(keep);
+    nSweep = numel(sBeg);
+    if nSweep < 3
+        error('importData:tooFewSweeps', ...
+              ['Found only %d full sweep(s) of %d station(s) in the midPlane ' ...
+               'export — the mesh ordering is not what assembleBodyFitted ' ...
+               'expects. Check writeMidPlane in <case>/system/controlDict.'], ...
+              nSweep, Nxb);
+    end
+
+    % --- 3. group the sweeps into mesh blocks ---
+    % blockMesh numbers cells block by block, so one block's sweeps are
+    % contiguous and their start points climb slowly away from the wall. The
+    % step to the next block's first sweep lands somewhere else along the wall
+    % and is far larger.
+    p0x = Ti.x(sBeg);  p0y = Ti.y(sBeg);
+    d0  = hypot(diff(p0x), diff(p0y));
+    bBeg = [1; find(d0 > 10 * median(d0)) + 1];
+    bEnd = [bBeg(2:end) - 1; nSweep];
+    nLay = bEnd - bBeg + 1;                  % wall-normal levels per block
+    nBlk = numel(bBeg);
+
+    Nx = nBlk * Nxb;
+    Ny = max(nLay);
+    if any(nLay ~= Ny)
+        warning('importData:raggedBlocks', ...
+                ['Mesh blocks carry different wall-normal depths (%s); the ' ...
+                 'short ones are padded with NaN at the free-stream end.'], ...
+                num2str(nLay(:).'));
+    end
+    fprintf('importData: body-fitted grid %d blocks x %d stations x %d levels -> %dx%d\n', ...
+            nBlk, Nxb, Ny, Ny, Nx);
+
+    % --- 4. reshape each block and lay the blocks out streamwise ---
+    % Inside a block the rows run sweep by sweep, so an (Nxb x nLay) reshape
+    % transposed gives level-by-station directly. Blocks are emitted in
+    % streamwise order (verified against the wall list in step 5).
+    names  = {'x','y','u','v','w','p','omz'};
+    names  = names(ismember(names, Ti.Properties.VariableNames));
+    G = struct();
+    for k = 1:numel(names)
+        f = names{k};
+        col = Ti.(f);
+        M = nan(Ny, Nx);
+        for b = 1:nBlk
+            rows = col(sBeg(bBeg(b)) : sEnd(bEnd(b)));
+            M(1:nLay(b), (b-1)*Nxb + (1:Nxb)) = reshape(rows, Nxb, nLay(b)).';
+        end
+        G.(f) = M;
+    end
+
+    % --- 5. attach the wall row, and use it to check the station order ---
+    % wallExtrapolation writes one row per wall face in wall-face order, which is
+    % the order the blocks tile. Each wall point must therefore sit directly
+    % below the matching column's first cell; if it does not, the blocks came out
+    % in an order this function does not understand and the grid would be
+    % scrambled, so fail rather than return a plausible-looking wrong field.
+    haveWall = height(Tw) == Nx;
+    if height(Tw) > 0 && ~haveWall
+        warning('importData:wallRowCount', ...
+                ['midPlane holds %d wall row(s) but the grid has %d station(s); ' ...
+                 'the wall row is dropped and wall-normal distance is measured ' ...
+                 'from the first cell instead.'], height(Tw), Nx);
+    end
+    if haveWall
+        off = hypot(Tw.x(:).' - G.x(1,:), Tw.y(:).' - G.y(1,:));
+        if max(off) > 5 * mstep
+            error('importData:stationOrderMismatch', ...
+                  ['Wall row %d sits %.3g m from the first cell of its column ' ...
+                   '(streamwise spacing is %.3g m). The reconstructed station ' ...
+                   'order does not match the wall-face order.'], ...
+                  find(off == max(off), 1), max(off), mstep);
+        end
+        for k = 1:numel(names)
+            f = names{k};
+            G.(f) = [Tw.(f)(:).'; G.(f)];      % wall becomes row 1
+        end
+        Ny = Ny + 1;
+    end
+
+    % --- 6. coordinates ---
+    % Wall-normal distance up each column, 0 at the wall (row 1 here), and
+    % streamwise arc length along that wall row, 0 at the first exported station.
+    % Same construction as plotCoords, so the two agree exactly. Without a wall
+    % row, n = 0 falls on the first interior cell instead. Note s is the WALL
+    % station broadcast up the column, not the local arc length at height n.
+    seg   = hypot(diff(G.x, 1, 1), diff(G.y, 1, 1));
+    sBF.n = [zeros(1, Nx); cumsum(seg, 1)];
+    sw    = [0, cumsum(hypot(diff(G.x(1,:)), diff(G.y(1,:))))];
+    sBF.s = repmat(sw, Ny, 1);
+
+    % Physical Cartesian cell centres, one level down: the figures never use them,
+    % but they are the only record of where the wall actually is (see the header).
+    sBF.geom.X = G.x;
+    sBF.geom.Y = G.y;
+
+    for k = 1:numel(names)
+        f = names{k};
+        if ~ismember(f, {'x','y'}); sBF.(f) = G.(f); end
+    end
+end
+
+% --- DFP: rectilinear grid — unique x and unique y are the grid lines ---
+function sBF = assembleRectilinear(T, tol)
+
     [xu, ~, ix] = uniquetol(T.x, tol, 'DataScale', 1);
     [yu, ~, iy] = uniquetol(T.y, tol, 'DataScale', 1);
     Nx = numel(xu);
     Ny = numel(yu);
 
+    % A body-fitted or otherwise deformed grid gives every cell its own x and y,
+    % so Nx and Ny both approach the row count and Nx*Ny explodes. Catch that
+    % here: allocating nan(Ny,Nx) would otherwise ask for hundreds of GB.
+    if Nx * Ny > 4 * height(T)
+        error('importData:notRectilinear', ...
+              ['midPlane has %d rows but %d unique x and %d unique y ' ...
+               '(Nx*Ny = %.3g). The grid is not rectilinear, so it cannot be ' ...
+               'rebuilt by meshgrid — every cell carries its own coordinates. ' ...
+               'A body-fitted mesh needs assembleBodyFitted.'], ...
+              height(T), Nx, Ny, Nx * double(Ny));
+    end
     if Nx * Ny ~= height(T)
         warning('importData:nonRectangular', ...
                 ['midPlane has %d rows but unique x * unique y = %d * %d = %d. ', ...
@@ -355,18 +571,50 @@ function T = readMidPlaneBinary(path)
     T = array2table(data, 'VariableNames', baseNames(1:nCols));
 end
 
-% --- local helper ---
+% --- local helper: PreProcessing case directory for the selected caseType ---
+% Segments are spelled exactly as they are on disk, and resolveCase enforces
+% that. macOS resolves paths case-INSENSITIVELY and Linux does not, so a folder
+% rename that is not mirrored here keeps every macOS run working while breaking
+% every Linux run — which is exactly what happened when the tree moved to
+% lower-case names and these four segments were left behind.
 function caseDir = caseDirFor(inp)
     switch inp.caseType
         case 'DFP'
-            caseDir = fullfile(inp.airPowerRoot, 'PreProcessing', 'Modules', ...
-                               'DirectFlatPlateModule');
+            segs = {'PreProcessing', 'modules', 'directFlatPlateModule'};
         case 'TTCP'
-            caseDir = fullfile(inp.airPowerRoot, 'PreProcessing', 'Modules', ...
-                               'TunnelToCurvedPlateModule', 'AirfoilLECase');
+            segs = {'PreProcessing', 'modules', 'tunnelToCurvedPlateModule', ...
+                    'airfoilLECase'};
         otherwise
             error('importData:badCaseType', ...
                   'Unknown caseType: ''%s''. Must be ''DFP'' or ''TTCP''.', ...
                   inp.caseType);
+    end
+    caseDir = resolveCase(inp.airPowerRoot, segs);
+end
+
+% --- walk a path one segment at a time, checking each against the real listing ---
+% An exact match is taken silently. A segment that differs only in case still
+% resolves — so a rename never hard-stops the user — but warns, on BOTH
+% platforms, naming the spelling to correct here. A missing segment is an error.
+function p = resolveCase(root, segs)
+    p = root;
+    for k = 1:numel(segs)
+        d = dir(p);
+        names = {d([d.isdir]).name};
+        if any(strcmp(names, segs{k}))
+            p = fullfile(p, segs{k});
+            continue;
+        end
+        hit = names(strcmpi(names, segs{k}));
+        if isempty(hit)
+            error('importData:caseDirNotFound', ...
+                  'No directory named ''%s'' under %s.', segs{k}, p);
+        end
+        warning('importData:caseDirSpelling', ...
+                ['Directory ''%s'' is spelled ''%s'' on disk. Resolved, but ' ...
+                 'this only works on a case-insensitive filesystem — update ' ...
+                 'caseDirFor in importData.m so Linux works too.'], ...
+                segs{k}, hit{1});
+        p = fullfile(p, hit{1});
     end
 end

@@ -12,8 +12,9 @@
 #   julia run.jl instAbility   DeHNSSo <mesh|run> <case>  # (wired in a later phase)
 #   julia run.jl PostProcessing <task>                    # importData | reynoldsOrrProdTerms
 #
-# MATLAB executable: `matlab` on PATH by default; override with the
-# AIRPOWER_MATLAB environment variable (e.g. the full .app path on macOS).
+# MATLAB executable: resolved automatically — $AIRPOWER_MATLAB, else `matlab` on
+# PATH, else the newest standard install (/Applications/MATLAB_R*.app on macOS,
+# /usr/local/MATLAB/R* on Linux). Set AIRPOWER_MATLAB to force a particular one.
 #
 
 const ROOT = @__DIR__
@@ -35,10 +36,65 @@ airPower dispatcher
 """)
 end
 
-# --- MATLAB launcher (matlab from PATH; override with AIRPOWER_MATLAB) ---
-function matlab_batch(statement)
-    matlab = get(ENV, "AIRPOWER_MATLAB", "matlab")
-    run(`$matlab -batch $statement`)
+# --- MATLAB launcher --------------------------------------------------------
+# Resolution ladder, so a fresh clone runs with no environment setup at all:
+#   1. $AIRPOWER_MATLAB       explicit override, wins outright
+#   2. `matlab` on PATH       the usual properly-linked install
+#   3. standard install dirs  newest release first
+# Step 3 is not redundant. On macOS `matlab` is very often a SHELL ALIAS rather
+# than a real executable, and an alias is invisible to a spawned process: the
+# dispatcher would die with ENOENT even though typing `matlab` works fine.
+const MATLAB_EXE = Ref("")
+
+function matlab_roots()
+    Sys.isapple() ? ["/Applications"] : ["/usr/local/MATLAB", "/opt/MATLAB", "/opt/matlab"]
+end
+
+function find_matlab()
+    isempty(MATLAB_EXE[]) || return MATLAB_EXE[]
+
+    override = get(ENV, "AIRPOWER_MATLAB", "")
+    if !isempty(override)
+        isfile(override) || error("AIRPOWER_MATLAB is set to '$override', which is not a file.")
+        return MATLAB_EXE[] = override
+    end
+
+    onpath = Sys.which("matlab")
+    onpath === nothing || return MATLAB_EXE[] = onpath
+
+    roots = matlab_roots()
+    found = Tuple{String,String}[]                    # (release tag, executable)
+    for r in roots
+        isdir(r) || continue
+        for d in (try readdir(r) catch; String[] end)
+            exe = joinpath(r, d, "bin", "matlab")
+            isfile(exe) || continue
+            tag = match(r"R(\d{4}[ab])", d)
+            push!(found, (tag === nothing ? "" : String(tag.captures[1]), exe))
+        end
+    end
+    isempty(found) && error("""
+        MATLAB not found. Tried, in order:
+          1. \$AIRPOWER_MATLAB  — unset
+          2. `matlab` on PATH    — not found. NOTE a shell alias does not count:
+                                   it is invisible to a spawned process.
+          3. $(join(roots, ", "))  — nothing matching */bin/matlab
+        Point AIRPOWER_MATLAB at the binary, e.g.
+          export AIRPOWER_MATLAB=/Applications/MATLAB_R2025b.app/bin/matlab
+        """)
+
+    sort!(found; by = first, rev = true)               # newest release first
+    exe = found[1][2]
+    @info "airPower: using MATLAB at $exe (set AIRPOWER_MATLAB to override)"
+    return MATLAB_EXE[] = exe
+end
+
+# Extra environment for the child is passed as keywords, e.g.
+#   matlab_batch(stmt; AIRPOWER_PP_DISPATCH = "1")
+function matlab_batch(statement; env...)
+    cmd = `$(find_matlab()) -batch $statement`
+    isempty(env) && return run(cmd)
+    run(addenv(cmd, [String(k) => v for (k, v) in env]...))
 end
 
 # --- serialize a Julia value to a MATLAB literal ---
@@ -119,8 +175,11 @@ function write_pp_config(pp, task)
         println(io, "inp.caseType       = $(mat_lit(pp.caseType));")
         println(io, "inp.fieldsFile     = $(mat_lit(pp.fieldsFile));")
         println(io, "inp.modeIdx        = $(mat_lit(pp.modeIdx));")
+        println(io, "inp.plotUProfiles  = $(mat_lit(pp.plotUProfiles));")
         println(io, "inp.validation     = $(mat_lit(pp.validation));")
         println(io, "inp.valXcZoom      = $(mat_lit(pp.valXcZoom));")
+        println(io, "inp.valShareX      = $(mat_lit(pp.valShareX));")
+        println(io, "inp.valYTop        = $(mat_lit(pp.valYTop));")
         # pulled from the PreProcessing blocks (no PostProcessing duplication):
         println(io, "inp.valPIV         = $(mat_lit(inp.VAL.valPIV));")
         println(io, "inp.valGen         = $(mat_lit(inp.VAL.Gen));")
@@ -135,8 +194,21 @@ function write_pp_config(pp, task)
         println(io, "inp.airfoilXCenter  = $(mat_lit(inp.TTCP.tunnel.xCenter));")   # [m]
         println(io, "inp.airfoilYCenter  = $(mat_lit(inp.TTCP.tunnel.yCenter));")   # [m]
         println(io, "inp.ro.loadAnalysis = $(mat_lit(pp.ro.loadAnalysis));")
-        println(io, "inp.ro.bufferFrac  = $(mat_lit(pp.ro.bufferFrac));")
-        println(io, "inp.ro.yMax        = $(mat_lit(pp.ro.yMax));")
+        # Shared plot window. An inputs.jl predating the `plot` block still runs:
+        # bufferFrac/yWallFrac carry over from `ro`. The y-ceilings do not — the old
+        # single `ro.yMax` could not say which load mode it meant, so it is left to
+        # the yWallFrac fallback rather than guessed at.
+        plt = hasproperty(pp, :plot) ? pp.plot : (;)
+        if !hasproperty(pp, :plot)
+            @warn "inputs.jl has no PostProcessing.plot block — using defaults; " *
+                  "plot.yMax is in mm now (the old ro.yMax was not). Please migrate."
+        end
+        getk(nt, k, d) = hasproperty(nt, k) ? getproperty(nt, k) :
+                         (hasproperty(pp.ro, k) ? getproperty(pp.ro, k) : d)
+        println(io, "inp.plot.bufferFrac = $(mat_lit(getk(plt, :bufferFrac, 0.85)));")
+        println(io, "inp.plot.yWallFrac  = $(mat_lit(getk(plt, :yWallFrac, 0.30)));")
+        println(io, "inp.plot.yMaxFields = $(mat_lit(hasproperty(plt, :yMaxFields) ? plt.yMaxFields : []));")
+        println(io, "inp.plot.yMaxBF     = $(mat_lit(hasproperty(plt, :yMaxBF)     ? plt.yMaxBF     : []));")
     end
     return gen
 end
@@ -158,9 +230,8 @@ function run_postprocessing(args)
     @info "airPower ▶ PostProcessing (MATLAB)" task = sub gen
     # AIRPOWER_PP_DISPATCH signals run.m that this config is authoritative (carries
     # the CLI task) — so run.m loads it as-is instead of re-syncing from inputs.jl.
-    stmt   = "run('$(joinpath(ROOT, "PostProcessing", "run.m"))')"
-    matlab = get(ENV, "AIRPOWER_MATLAB", "matlab")
-    run(addenv(`$matlab -batch $stmt`, "AIRPOWER_PP_DISPATCH" => "1"))
+    stmt = "run('$(joinpath(ROOT, "PostProcessing", "run.m"))')"
+    matlab_batch(stmt; AIRPOWER_PP_DISPATCH = "1")
 end
 
 # --- main ---

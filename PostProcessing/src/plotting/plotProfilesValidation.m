@@ -39,7 +39,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %                   stations, so every panel has an exact experimental overlay.
 %   valPIV = false  no experimental data; the stations are grid columns spread
 %                   evenly over the window, DeHNSSo alone.
-% Both figures are cut at the outflow buffer (inp.ro.bufferFrac), as everywhere
+% Both figures are cut at the outflow buffer (inp.plot.bufferFrac), as everywhere
 % else in PostProcessing. Panel titles carry x/c and, in brackets, S*/delta_0 --
 % the same S*/delta_0 the plotProfiles u-figure uses.
 %
@@ -200,7 +200,7 @@ end
 %                  the window, DeHNSSo alone.
 %
 %  Either way the window is clipped to the valid domain, i.e. up to the
-%  outflow-buffer start (inp.ro.bufferFrac).
+%  outflow-buffer start (inp.plot.bufferFrac).
 % ======================================================================
 function S = stations(G, o, inp, xcWin)
     S = emptyStations();
@@ -517,8 +517,8 @@ end
 % streamwise fraction of the domain where the outflow buffer starts
 function f = bufferFrac(inp)
     f = 0.85;
-    if isfield(inp,'ro') && isfield(inp.ro,'bufferFrac') && ~isempty(inp.ro.bufferFrac)
-        f = inp.ro.bufferFrac;
+    if isfield(inp,'plot') && isfield(inp.plot,'bufferFrac') && ~isempty(inp.plot.bufferFrac)
+        f = inp.plot.bufferFrac;
     end
 end
 

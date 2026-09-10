@@ -24,26 +24,11 @@ function plotReynoldsOrrProd(sRO, sBF, inp, savedir)
     M = numel(sel);
     nc = min(M, 3);  nr = ceil(M / nc);
 
-    % near-wall focus: rows run free-stream(1,:) -> wall(end,:), so small y is
-    % the wall; show the lower part of the domain where production concentrates.
-    % y-axis top: inp.ro.yMax (absolute) if set, else 30% of the domain height.
-    y0 = min(Y(:));  y1 = max(Y(:));
-    if isfield(inp,'ro') && isfield(inp.ro,'yMax') && ~isempty(inp.ro.yMax)
-        yTop = y0 + inp.ro.yMax;
-    else
-        yTop = y0 + 0.30 * (y1 - y0);
-    end
-
-    % x-axis ends where the DeHNSSo outflow buffer begins (default 85% of the
-    % domain, matching Opt.xb=85), so the damped tail is not shown. Override
-    % via inp.ro.bufferFrac (1 -> show the full domain).
-    bufFrac = 0.85;
-    if isfield(inp, 'ro') && isfield(inp.ro, 'bufferFrac') && ~isempty(inp.ro.bufferFrac)
-        bufFrac = inp.ro.bufferFrac;
-    end
-    Nx = size(X, 2);
-    ib = min(Nx, max(2, round(bufFrac * Nx)));
-    x0 = min(X(:));  xEnd = X(1, ib);
+    % Window from the shared definition (near-wall y, x cut at the buffer start),
+    % so this figure frames the same region as every other one.
+    [xl, yl] = plotWindow(X, Y, inp);
+    x0 = xl(1);  xEnd = xl(2);
+    y0 = yl(1);  yTop = yl(2);
 
     fig = figure('Position', [60 60 500*nc 380*nr], 'Color', 'w');
     for p = 1:M

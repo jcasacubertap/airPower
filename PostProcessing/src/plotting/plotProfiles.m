@@ -47,13 +47,9 @@ function f = uFigure(sBF, sPert, inp, savedir)
 
     [X, Y] = plotCoords(sBF, inp);             % wall-fitted rectangle (unwraps curved TTCP wall)
     Nx = size(X, 2);
-    [~, yl] = plotWindow(X, Y, inp);           % near-wall y window
+    [~, yl, bufFrac] = plotWindow(X, Y, inp);  % near-wall y window + buffer cut
 
     % stations: inlet, 2/4, 3/4, buffer start (fractions of the streamwise extent)
-    bufFrac = 0.85;
-    if isfield(inp,'ro') && isfield(inp.ro,'bufferFrac') && ~isempty(inp.ro.bufferFrac)
-        bufFrac = inp.ro.bufferFrac;
-    end
     % four stations evenly spaced from the inlet to the buffer start, so they
     % stay ordered and inside the plotted (buffer-cut) domain for any bufFrac.
     fracs = linspace(0, bufFrac, 4);

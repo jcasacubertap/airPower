@@ -12,7 +12,7 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
 %     and the perturbation-energy amplitude max_y 0.5(|uhat|^2+|vhat|^2+|what|^2)
 %     (bottom).
 % Fields are amplitude-scaled (A folded in by importData). Non-dimensional
-% (x by delta_0, velocities by u_infty); plot window via plotWindow / inp.ro.
+% (x by delta_0, velocities by u_infty); plot window via plotWindow / inp.plot.
 %
 % Save behaviour: savedir non-empty -> PNGs written there; empty/omitted ->
 % figures left open for interactive inspection.
