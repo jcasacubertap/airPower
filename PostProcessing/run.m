@@ -15,6 +15,7 @@ clear; clc;
 %       direct run always mirrors the current inputs.jl (task = its default).
 here     = fileparts(mfilename('fullpath'));
 genFile  = fullfile(here, 'inputs_gen.m');
+addpath(genpath(fullfile(here, 'src')));   % findJulia is needed before the sync
 
 if ~isempty(getenv('AIRPOWER_PP_DISPATCH'))
     % (1) dispatcher run — config already written with the CLI task.
@@ -24,22 +25,18 @@ if ~isempty(getenv('AIRPOWER_PP_DISPATCH'))
 else
     % (2) direct MATLAB run — re-sync inputs_gen.m from inputs.jl via the dispatcher.
     fprintf('run: syncing inputs_gen.m from inputs.jl ...\n');
-    % Locate julia: AIRPOWER_JULIA env → julia on PATH → ~/.juliaup/bin/julia.
-    jl = getenv('AIRPOWER_JULIA');
-    if isempty(jl) || ~isfile(jl)
-        [s0, p0] = system('command -v julia');
-        if s0 == 0 && ~isempty(strtrim(p0))
-            jl = strtrim(p0);
-        else
-            cand = fullfile(getenv('HOME'), '.juliaup', 'bin', 'julia');
-            if isfile(cand)
-                jl = cand;
-            else
-                error('run:noJulia', ...
-                      ['julia not found (needed to sync inputs_gen.m from inputs.jl).\n' ...
-                       'Set AIRPOWER_JULIA to the julia binary, or run via the dispatcher.']);
-            end
-        end
+    % findJulia walks $AIRPOWER_JULIA -> the shell's own lookup -> the platform's
+    % standard install locations. That last step matters on every OS: a MATLAB
+    % started from Finder, the Dock or the Start menu inherits a minimal
+    % environment, so a perfectly good julia is often invisible to system().
+    [jl, tried] = findJulia();
+    if isempty(jl)
+        error('run:noJulia', ...
+              ['julia not found (needed to sync inputs_gen.m from inputs.jl).\n' ...
+               'Looked at: %s\n' ...
+               'Set AIRPOWER_JULIA to the julia binary, or run via the dispatcher:\n' ...
+               '  julia run.jl PostProcessing <importData|reynoldsOrrProdTerms>'], ...
+              strjoin(tried, ', '));
     end
     cmd = sprintf('"%s" "%s" PostProcessing config', jl, fullfile(here, '..', 'run.jl'));
     [st, out] = system(cmd);

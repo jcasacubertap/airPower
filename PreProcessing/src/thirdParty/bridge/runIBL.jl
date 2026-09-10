@@ -19,14 +19,22 @@ function _find_matlab()
     # present, path order would let the root name outrank the release.
     found = [(m === nothing ? "" : String(m.captures[1]), exe)
              for (m, exe) in ((match(r"R(\d{4}[ab])", basename(d)),
-                               joinpath(d, "bin", "matlab")) for d in glob_app_dirs())
+                               joinpath(d, "bin", Sys.iswindows() ? "matlab.exe" : "matlab"))
+                              for d in glob_app_dirs())
              if isfile(exe)]
     isempty(found) && return nothing
     return last(first(sort(found; by = first, rev = true)))
 end
 
 function glob_app_dirs()
-    roots = Sys.isapple() ? ["/Applications"] : ["/usr/local/MATLAB", "/opt/MATLAB"]
+    roots = if Sys.isapple()
+        ["/Applications"]
+    elseif Sys.iswindows()
+        [joinpath(get(ENV, "PROGRAMFILES",      "C:\\Program Files"),       "MATLAB"),
+         joinpath(get(ENV, "PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "MATLAB")]
+    else
+        ["/usr/local/MATLAB", "/opt/MATLAB"]
+    end
     dirs = String[]
     for r in roots
         isdir(r) || continue

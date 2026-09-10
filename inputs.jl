@@ -237,7 +237,7 @@ const inp = (
     # ======================================================================
     PostProcessing = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
-        loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
+        loadMode       = "loadBF",             # 'loadBF' | 'loadFields'
         caseType       = "TTCP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
         fieldsFile     = "m3j_clean_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
         modeIdx        = Int[2,2],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all.
@@ -255,10 +255,24 @@ const inp = (
                                              #   resolves each station's shape but makes every panel look alike.
         valYTop        = [],                 # w-validation figures: wall-distance limit [mm], shared by both rows.
                                              #   [] -> auto (1.5 x the perturbation extent over the plotted stations)
+        # Plot window — ONE definition, shared by every PostProcessing figure
+        # (base flow, perturbation shapes, profiles, Reynolds–Orr). See
+        # PostProcessing/src/plotting/plotWindow.m.
+        plot = (
+            bufferFrac = 0.85,     # x-axis end, as a fraction of the streamwise extent: where the
+                                   #   DeHNSSo outflow buffer begins, so the damped tail is not shown.
+                                   #   1 -> full domain.
+            # y-axis max above the wall. Each load mode is plotted in the unit system it is
+            # COMPUTED in, and keeps it in the axes and legends too: the stability analysis
+            # runs non-dimensionally, so loadFields stays in delta_0, while loadBF carries
+            # the dimensional OpenFOAM grid. One key each, units stated, no conversion
+            # between them — plotWindow picks the right one from loadMode.
+            yMaxFields = 20.0,     # loadFields: wall-normal max in y/delta_0 ; [] -> yWallFrac
+            yMaxBF     = 0.005,    # loadBF    : wall-normal max in METRES     ; [] -> yWallFrac
+            yWallFrac  = 0.30,     # near-wall fraction of the domain height used when the above is []
+        ),
         ro = (
             loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
-            bufferFrac   = 0.85,       # plot x-axis end fraction (buffer start); 1 -> full
-            yMax         = 20.0,       # plot y-axis max (wall-normal, in y/delta0); [] -> near-wall fraction
         ),
     ),
 

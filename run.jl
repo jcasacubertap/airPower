@@ -46,9 +46,21 @@ end
 # dispatcher would die with ENOENT even though typing `matlab` works fine.
 const MATLAB_EXE = Ref("")
 
+# Where a standard MATLAB install lives, per platform. The layout is the same
+# everywhere — <root>/<release dir>/bin/matlab[.exe] — only the roots differ.
 function matlab_roots()
-    Sys.isapple() ? ["/Applications"] : ["/usr/local/MATLAB", "/opt/MATLAB", "/opt/matlab"]
+    if Sys.isapple()
+        ["/Applications"]                                   # MATLAB_R2025b.app
+    elseif Sys.iswindows()
+        pf   = get(ENV, "PROGRAMFILES",      "C:\\Program Files")
+        pf86 = get(ENV, "PROGRAMFILES(X86)", "C:\\Program Files (x86)")
+        [joinpath(pf, "MATLAB"), joinpath(pf86, "MATLAB")]  # ...\MATLAB\R2025b
+    else
+        ["/usr/local/MATLAB", "/opt/MATLAB", "/opt/matlab"] # .../R2025b
+    end
 end
+
+matlab_exename() = Sys.iswindows() ? "matlab.exe" : "matlab"
 
 function find_matlab()
     isempty(MATLAB_EXE[]) || return MATLAB_EXE[]
@@ -67,7 +79,7 @@ function find_matlab()
     for r in roots
         isdir(r) || continue
         for d in (try readdir(r) catch; String[] end)
-            exe = joinpath(r, d, "bin", "matlab")
+            exe = joinpath(r, d, "bin", matlab_exename())
             isfile(exe) || continue
             tag = match(r"R(\d{4}[ab])", d)
             push!(found, (tag === nothing ? "" : String(tag.captures[1]), exe))
@@ -77,7 +89,9 @@ function find_matlab()
         MATLAB not found. Tried, in order:
           1. \$AIRPOWER_MATLAB  — unset
           2. `matlab` on PATH    — not found. NOTE a shell alias does not count:
-                                   it is invisible to a spawned process.
+                                   it is invisible to a spawned process. A MATLAB
+                                   launched from Finder/Dock/Start menu also sees
+                                   only a minimal environment.
           3. $(join(roots, ", "))  — nothing matching */bin/matlab
         Point AIRPOWER_MATLAB at the binary, e.g.
           export AIRPOWER_MATLAB=/Applications/MATLAB_R2025b.app/bin/matlab
@@ -200,8 +214,9 @@ function write_pp_config(pp, task)
         # the yWallFrac fallback rather than guessed at.
         plt = hasproperty(pp, :plot) ? pp.plot : (;)
         if !hasproperty(pp, :plot)
-            @warn "inputs.jl has no PostProcessing.plot block — using defaults; " *
-                  "plot.yMax is in mm now (the old ro.yMax was not). Please migrate."
+            @warn "inputs.jl has no PostProcessing.plot block — plot windows fall back " *
+                  "to yWallFrac (30% of the domain). Move bufferFrac/yMax out of `ro` " *
+                  "into `plot` as yMaxFields [delta_0] and yMaxBF [m]."
         end
         getk(nt, k, d) = hasproperty(nt, k) ? getproperty(nt, k) :
                          (hasproperty(pp.ro, k) ? getproperty(pp.ro, k) : d)
