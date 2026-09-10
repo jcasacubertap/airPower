@@ -365,6 +365,29 @@ function sBF = assembleBodyFitted(T, isWall)
         Ny = Ny + 1;
     end
 
+    % --- 5b. orient the stations inflow -> outflow ---
+    % The block order is the mesh's, and it need not follow the flow: on this
+    % C-grid the wall faces run from xi/c ~ 0.5 back to ~ 0.02, i.e. AGAINST it.
+    % Decide physically, exactly as the wall-normal order is decided downstream —
+    % project the free-stream velocity (row end here) onto the wall tangent that
+    % points from column i to i+1 (row 1 is the wall). If the flow opposes it,
+    % reverse every column so column 1 is the most upstream station. s then starts
+    % at the numerical inflow as advertised, the boundary layer thickens with s
+    % instead of thinning, and a downstream-fraction cut (inp.plot.bufferFrac)
+    % trims the outflow buffer rather than the inlet.
+    tx = gradient(G.x(1,:));  ty = gradient(G.y(1,:));
+    tl = hypot(tx, ty);  tx = tx ./ tl;  ty = ty ./ tl;
+    proj = G.u(end,:) .* tx + G.v(end,:) .* ty;
+    if mean(proj, 'omitnan') < 0
+        for k = 1:numel(names)
+            G.(names{k}) = fliplr(G.(names{k}));
+        end
+        fprintf(['importData: reversed station order (mesh ran against the flow) ' ...
+                 '-> column 1 is the inflow\n']);
+    else
+        fprintf('importData: stations already run inflow -> outflow\n');
+    end
+
     % --- 6. coordinates ---
     % Wall-normal distance up each column, 0 at the wall (row 1 here), and
     % streamwise arc length along that wall row, 0 at the first exported station.

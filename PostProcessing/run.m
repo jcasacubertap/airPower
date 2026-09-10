@@ -24,31 +24,52 @@ if ~isempty(getenv('AIRPOWER_PP_DISPATCH'))
     end
 else
     % (2) direct MATLAB run — re-sync inputs_gen.m from inputs.jl via the dispatcher.
-    fprintf('run: syncing inputs_gen.m from inputs.jl ...\n');
+    %
+    % Julia's ONLY job here is translating inputs.jl into inputs_gen.m, so it is
+    % needed to pick up an EDIT to inputs.jl — not to post-process. When it is
+    % missing but a config is already present we say so loudly and carry on,
+    % rather than blocking analysis over a dependency this stage barely uses.
+    %
     % findJulia walks $AIRPOWER_JULIA -> the shell's own lookup -> the platform's
     % standard install locations. That last step matters on every OS: a MATLAB
     % started from Finder, the Dock or the Start menu inherits a minimal
     % environment, so a perfectly good julia is often invisible to system().
     [jl, tried] = findJulia();
-    if isempty(jl)
+
+    if isempty(jl) && isfile(genFile)
+        d = dir(genFile);
+        warning('run:juliaMissingUsingCache', ...
+                ['julia not found, so inputs_gen.m could NOT be re-synced from ' ...
+                 'inputs.jl.\nUsing the existing config, generated %s. ANY EDIT ' ...
+                 'to inputs.jl since then is NOT in effect.\nLooked at: %s'], ...
+                d.date, strjoin(tried, ', '));
+    elseif isempty(jl)
         error('run:noJulia', ...
-              ['julia not found (needed to sync inputs_gen.m from inputs.jl).\n' ...
+              ['julia not found, and there is no inputs_gen.m to fall back on.\n' ...
                'Looked at: %s\n' ...
                'Set AIRPOWER_JULIA to the julia binary, or run via the dispatcher:\n' ...
                '  julia run.jl PostProcessing <importData|reynoldsOrrProdTerms>'], ...
               strjoin(tried, ', '));
-    end
-    cmd = sprintf('"%s" "%s" PostProcessing config', jl, fullfile(here, '..', 'run.jl'));
-    [st, out] = system(cmd);
-    if st ~= 0 || ~isfile(genFile)
-        error('run:genConfig', ...
-              ['Could not sync inputs_gen.m from inputs.jl.\n' ...
-               'Fix julia (set AIRPOWER_JULIA), or run via the dispatcher:\n' ...
-               '  julia run.jl PostProcessing <importData|reynoldsOrrProdTerms>\n%s'], out);
+    else
+        fprintf('run: syncing inputs_gen.m from inputs.jl ...\n');
+        cmd = sprintf('"%s" "%s" PostProcessing config', jl, fullfile(here, '..', 'run.jl'));
+        [st, out] = system(cmd);
+        if st ~= 0 || ~isfile(genFile)
+            error('run:genConfig', ...
+                  ['Could not sync inputs_gen.m from inputs.jl.\n' ...
+                   'Fix julia (set AIRPOWER_JULIA), or run via the dispatcher:\n' ...
+                   '  julia run.jl PostProcessing <importData|reynoldsOrrProdTerms>\n%s'], out);
+        end
     end
 end
 addpath(here);
 inputs_gen;   % sets `inp` (from the PostProcessing block of airPower/inputs.jl)
+
+% inputs_gen.m records the absolute path of the machine that generated it, so a
+% config that travels — a shared checkout, a committed default, a copy moved
+% between machines — would otherwise point at someone else's disk. run.m knows
+% where it actually is; trust that over the recorded value.
+inp.airPowerRoot = fileparts(here);
 
 % Add paths
 addpath(genpath(fullfile(here, 'src')));
