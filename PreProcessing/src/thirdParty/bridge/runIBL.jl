@@ -4,7 +4,7 @@ using MAT
     _find_matlab() → String | nothing
 
 Locate a MATLAB executable, using the same ladder as the top-level dispatcher
-(`run.jl`): `$AIRPOWER_MATLAB`, then `PATH`, then the standard install
+(`run.jl`): the AIRPOWER_MATLAB env var, then `PATH`, then the standard install
 directories (newest release wins). The last step is what saves a default macOS
 setup, where `matlab` is typically a shell alias and so cannot be spawned.
 """

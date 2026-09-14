@@ -14,15 +14,18 @@ function [sBF, sPert, inp] = importData(inp)
 %   sBF.u, sBF.v, sBF.w    velocity components
 %   sBF.p                  pressure          (loadBF; absent in loadFields)
 %   sBF.omz                z-vorticity       (loadBF, if present in source)
-%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients (loadFields: read from source;
-%                          loadBF/DFP: computed here via differentiateField;
-%                          loadBF/TTCP: NOT provided — see assembleBodyFitted)
+%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients — loadFields ONLY (read from the
+%                          stability grid). loadBF provides none, for either mesh:
+%                          both are multi-block structured and body-fitted, where a
+%                          row step changes x and y together, so a Cartesian
+%                          differentiateField call would be wrong. See
+%                          assembleBodyFitted for what correct metrics would need.
 %
 % Coordinates come in one of two shapes, because the two sources hold the base
 % flow on different kinds of grid:
-%   sBF.x, sBF.y   rectilinear grids (loadFields, and loadBF on the DFP mesh),
-%                  i.e. Cartesian x and y
-%   sBF.s, sBF.n   wall-fitted pair on the body-fitted TTCP mesh (loadBF):
+%   sBF.x, sBF.y   rectilinear stability grid (loadFields), i.e. Cartesian x and y
+%   sBF.s, sBF.n   wall-fitted pair on the body-fitted PreProcessing meshes
+%                  (loadBF, both DFP and TTCP):
 %                  s = arc length along the wall, 0 at the first exported station
 %                  (the S* of the figures); n = wall-normal distance. Named (s,n)
 %                  rather than (s,y) so that y NEVER means anything but Cartesian
@@ -164,14 +167,14 @@ end
 % inp.wallExtrap depending on whether the file contained wall-extrapolation
 % rows (u=v=w=0 added at wall face centres by the writeMidPlane function object).
 %
-% How the rows go back on a grid depends on the mesh, and NEITHER path
-% interpolates — every value returned is the cell value OpenFOAM wrote:
-%   DFP  — rectilinear: the unique x and unique y ARE the grid lines, so the
-%          rows scatter straight into a meshgrid    (assembleRectilinear)
-%   TTCP — body-fitted C-grid: every cell carries its own (x,y) even though the
-%          (i,j) topology is perfect, so unique x/y sees ~N distinct values in
-%          each direction and a meshgrid is meaningless. The grid is recovered
-%          from the mesh ordering instead          (assembleBodyFitted)
+% Both meshes are multi-block structured exports, so both go through
+% assembleBodyFitted, which recovers the grid from the mesh ordering. Neither
+% could be rebuilt by uniquetol on x and y: the cells are body-fitted, so every
+% one carries its own (x,y) even though the (i,j) topology is perfect, and
+% unique x/y sees ~N distinct values in each direction. The two differ only in
+% how the blocks tile — TTCP one band of 6 equal-width blocks, DFP 2 bands of 6
+% unequal ones — which assembleBodyFitted works out for itself.
+% No path interpolates: every value returned is the cell value OpenFOAM wrote.
 function [sBF, inp] = importFromPreProc(inp)
 
     caseDir = caseDirFor(inp);
@@ -190,7 +193,7 @@ function [sBF, inp] = importFromPreProc(inp)
               'midPlane.bin/.csv not found in %s/postProcessing/', caseDir);
     end
 
-    % Absolute tolerance for grid-position dedup. The ASCII midPlane.csv
+    % Absolute tolerance for the z-plane check below. The ASCII midPlane.csv
     % is written with controlDict's writePrecision (typically 6 sig figs),
     % so cell positions of O(0.1 m) carry ~1e-7 m of FP noise after
     % round-trip. 1e-7 m collapses that noise without losing real cells.
@@ -223,15 +226,10 @@ function [sBF, inp] = importFromPreProc(inp)
         end
     end
 
-    switch upper(inp.caseType)
-        case 'TTCP'
-            sBF = assembleBodyFitted(T, isWall);
-        otherwise
-            sBF = assembleRectilinear(T, tol);
-    end
+    sBF = assembleBodyFitted(T, isWall);
 end
 
-% --- TTCP: rebuild the body-fitted C-grid from the mesh ordering -----------
+% --- DFP & TTCP: rebuild the multi-block body-fitted grid from the mesh ordering ---
 % Returns, all Ny x Nx with row 1 = wall (orientFreestreamToWall then flips the
 % whole set so row 1 is free-stream and row end the wall):
 %   .s            streamwise arc length along the wall, 0 at the first exported
@@ -256,8 +254,8 @@ function sBF = assembleBodyFitted(T, isWall)
     end
 
     % --- 1. cut the interior rows into streamwise sweeps ---
-    % writeMidPlane appends cells in mesh order, which on the C-grid means one
-    % sweep along the wall per wall-normal level. Neighbours inside a sweep sit
+    % writeMidPlane appends cells in mesh order, which within a block means one
+    % sweep along the block per wall-normal level. Neighbours inside a sweep sit
     % one streamwise spacing apart; the step from the end of a sweep back to the
     % start of the next spans the whole sweep, ~2 orders of magnitude more. That
     % jump marks the boundary, so no knowledge of the block layout is needed.
@@ -271,69 +269,103 @@ function sBF = assembleBodyFitted(T, isWall)
     sBeg = [1; brk + 1];
     sEnd = [brk; height(Ti)];
     sLen = sEnd - sBeg + 1;
-
-    Nxb = mode(sLen);        % stations per sweep = streamwise cells in one block
-
-    % --- 2. drop partial sweeps at the exportHeight ceiling ---
-    % exportHeight cuts the slab at a fixed wall-normal distance, so a handful of
-    % columns can carry one extra cell right at the cut. Those arrive as a short
-    % sweep; keeping them would add a row that is almost entirely NaN, so they go
-    % and the assembled grid stays exactly rectangular.
-    keep = (sLen == Nxb);
-    if any(~keep)
+    % Drop fragments at the exportHeight ceiling. The cut sits at a fixed
+    % wall-normal distance, so a few columns can carry one extra cell right at it;
+    % those arrive as a sweep far narrower than its neighbours. Compare LOCALLY,
+    % not against a global width — block widths legitimately differ (DFP runs
+    % 288/48/96/48/560/192), and only a fragment is narrow relative to both
+    % neighbours. Keeping one would split a band and break the tiling.
+    nb = [sLen(2:end); sLen(end)];  pv = [sLen(1); sLen(1:end-1)];
+    frag = sLen < 0.5 * min(nb, pv);
+    if any(frag)
         fprintf(['importData: dropped %d cell(s) in %d partial sweep(s) at the ' ...
                  'exportHeight ceiling (grid kept rectangular)\n'], ...
-                sum(sLen(~keep)), nnz(~keep));
+                sum(sLen(frag)), nnz(frag));
+        sBeg = sBeg(~frag);  sEnd = sEnd(~frag);  sLen = sLen(~frag);
     end
-    sBeg = sBeg(keep);  sEnd = sEnd(keep);
+
     nSweep = numel(sBeg);
     if nSweep < 3
         error('importData:tooFewSweeps', ...
-              ['Found only %d full sweep(s) of %d station(s) in the midPlane ' ...
-               'export — the mesh ordering is not what assembleBodyFitted ' ...
-               'expects. Check writeMidPlane in <case>/system/controlDict.'], ...
-              nSweep, Nxb);
+              ['Found only %d sweep(s) in the midPlane export — the mesh ordering ' ...
+               'is not what assembleBodyFitted expects. Check writeMidPlane in ' ...
+               '<case>/system/controlDict.'], nSweep);
     end
 
-    % --- 3. group the sweeps into mesh blocks ---
-    % blockMesh numbers cells block by block, so one block's sweeps are
-    % contiguous and their start points climb slowly away from the wall. The
-    % step to the next block's first sweep lands somewhere else along the wall
-    % and is far larger.
+    % --- 2. group the sweeps into mesh blocks ---
+    % blockMesh numbers cells block by block, so one block's sweeps are contiguous,
+    % all the same width, and their start points climb slowly away from the wall.
+    % A boundary is therefore a change of width OR a jump in where the sweep starts
+    % (the next block sits somewhere else entirely). Both tests are needed: TTCP's
+    % blocks are all the same width and are caught by the jump, while DFP's differ
+    % in width (288/48/96/48/560/192) and some are caught by the width change.
     p0x = Ti.x(sBeg);  p0y = Ti.y(sBeg);
     d0  = hypot(diff(p0x), diff(p0y));
-    bBeg = [1; find(d0 > 10 * median(d0)) + 1];
-    bEnd = [bBeg(2:end) - 1; nSweep];
-    nLay = bEnd - bBeg + 1;                  % wall-normal levels per block
-    nBlk = numel(bBeg);
+    isBnd = (diff(sLen) ~= 0) | (d0 > 10 * median(d0));
+    bBeg  = [1; find(isBnd) + 1];
+    bEnd  = [bBeg(2:end) - 1; nSweep];
+    nBlk  = numel(bBeg);
 
-    Nx = nBlk * Nxb;
-    Ny = max(nLay);
-    if any(nLay ~= Ny)
-        warning('importData:raggedBlocks', ...
-                ['Mesh blocks carry different wall-normal depths (%s); the ' ...
-                 'short ones are padded with NaN at the free-stream end.'], ...
-                num2str(nLay(:).'));
+    W = sLen(bBeg);                     % stations per block
+    L = bEnd - bBeg + 1;                % wall-normal levels per block
+
+    % --- 3. place each block in the global grid ---
+    % Blocks tile a rectangle, but in BOTH directions: DFP is 6 blocks across x by
+    % 2 bands in y ($NyB / $NyT in its blockMeshDict), TTCP a single band of 6.
+    % A band is the set of blocks spanning the same wall-normal interval, so group
+    % by that, order the bands wall-outwards, and order each band streamwise.
+    % A band is a run of CONSECUTIVE blocks carrying the same number of levels:
+    % blockMesh numbers a whole band before starting the next ($NyB blocks 0-5,
+    % then $NyT blocks 6-11 in the DFP dict), so the run structure identifies them
+    % directly. Matching wall-normal extents numerically does not work — the bump
+    % deforms the mesh, so blocks in one band no longer share an extent.
+    band  = cumsum([1; L(2:end) ~= L(1:end-1)]);
+    nBand = band(end);
+
+    dLo = zeros(nBlk,1);
+    for b = 1:nBlk
+        lo = sBeg(bBeg(b)) : sEnd(bBeg(b));          % sweep nearest the wall
+        dLo(b) = mean(wallDist(Ti.x(lo), Ti.y(lo), Tw));
     end
-    fprintf('importData: body-fitted grid %d blocks x %d stations x %d levels -> %dx%d\n', ...
-            nBlk, Nxb, Ny, Ny, Nx);
+    [~, bandOrder] = sort(arrayfun(@(k) min(dLo(band == k)), 1:nBand));   % wall outwards
 
-    % --- 4. reshape each block and lay the blocks out streamwise ---
-    % Inside a block the rows run sweep by sweep, so an (Nxb x nLay) reshape
-    % transposed gives level-by-station directly. Blocks are emitted in
-    % streamwise order (verified against the wall list in step 5).
+    Nx = sum(W(band == bandOrder(1)));
+    Ny = 0;
+    for k = bandOrder
+        if sum(W(band == k)) ~= Nx
+            error('importData:blocksNotRectangular', ...
+                  ['Mesh blocks do not tile a rectangle: band %d spans %d stations ' ...
+                   'but the wall band spans %d.'], k, sum(W(band == k)), Nx);
+        end
+        Ny = Ny + L(find(band == k, 1));
+    end
+    fprintf('importData: %d blocks in %d band(s) -> %dx%d grid\n', nBlk, nBand, Ny, Nx);
+
+    % --- 4. reshape each block and lay it into place ---
+    % Inside a block the rows run sweep by sweep, so an (W x L) reshape transposed
+    % gives level-by-station directly.
     names  = {'x','y','u','v','w','p','omz'};
     names  = names(ismember(names, Ti.Properties.VariableNames));
     G = struct();
-    for k = 1:numel(names)
-        f = names{k};
-        col = Ti.(f);
-        M = nan(Ny, Nx);
-        for b = 1:nBlk
-            rows = col(sBeg(bBeg(b)) : sEnd(bEnd(b)));
-            M(1:nLay(b), (b-1)*Nxb + (1:Nxb)) = reshape(rows, Nxb, nLay(b)).';
+    for k = 1:numel(names); G.(names{k}) = nan(Ny, Nx); end
+
+    r0 = 0;
+    for k = bandOrder
+        % Blocks keep the mesh's own order within a band. Sorting them by mean x
+        % looks tempting but is wrong: it reorders blocks without reversing the
+        % columns INSIDE each one, and TTCP's blocks run x-descending internally,
+        % so the result is a sawtooth. Step 5 checks the assembled wall instead.
+        ib = find(band == k);
+        c0 = 0;
+        for b = ib(:).'
+            rows = sBeg(bBeg(b)) : sEnd(bEnd(b));
+            for m = 1:numel(names)
+                G.(names{m})(r0 + (1:L(b)), c0 + (1:W(b))) = ...
+                    reshape(Ti.(names{m})(rows), W(b), L(b)).';
+            end
+            c0 = c0 + W(b);
         end
-        G.(f) = M;
+        r0 = r0 + L(ib(1));
     end
 
     % --- 5. attach the wall row, and use it to check the station order ---
@@ -350,23 +382,44 @@ function sBF = assembleBodyFitted(T, isWall)
                  'from the first cell instead.'], height(Tw), Nx);
     end
     if haveWall
-        off = hypot(Tw.x(:).' - G.x(1,:), Tw.y(:).' - G.y(1,:));
-        if max(off) > 5 * mstep
+        % Match wall faces to columns rather than assuming a shared order: the
+        % blocks are laid out streamwise here, which need not be the order
+        % writeMidPlane emitted the wall faces in. A correct grid gives a
+        % bijection with every wall point within a cell or so of its column's
+        % first cell; a scrambled one gives neither, so both are checked.
+        [off, pick] = min(hypot(Tw.x(:) - G.x(1,:), Tw.y(:) - G.y(1,:)), [], 1);
+        if numel(unique(pick)) ~= Nx || max(off) > 5 * mstep
             error('importData:stationOrderMismatch', ...
-                  ['Wall row %d sits %.3g m from the first cell of its column ' ...
-                   '(streamwise spacing is %.3g m). The reconstructed station ' ...
-                   'order does not match the wall-face order.'], ...
-                  find(off == max(off), 1), max(off), mstep);
+                  ['Wall rows do not map one-to-one onto the reconstructed ' ...
+                   'stations (%d distinct of %d; worst offset %.3g m against a ' ...
+                   'streamwise spacing of %.3g m). The block layout is not what ' ...
+                   'assembleBodyFitted expects.'], ...
+                  numel(unique(pick)), Nx, max(off), mstep);
         end
         for k = 1:numel(names)
             f = names{k};
-            G.(f) = [Tw.(f)(:).'; G.(f)];      % wall becomes row 1
+            G.(f) = [Tw.(f)(pick).'; G.(f)];   % wall becomes row 1, in column order
         end
         Ny = Ny + 1;
+
+        % The assembled wall must be a continuous path: neighbouring columns one
+        % streamwise spacing apart. Blocks laid out in the wrong order still pass
+        % the bijection above (every column keeps a unique nearest wall face) but
+        % leave a jump at each block seam, which would silently inflate the arc
+        % length s computed from this row.
+        wstep = hypot(diff(G.x(1,:)), diff(G.y(1,:)));
+        if max(wstep) > 5 * median(wstep)
+            error('importData:wallNotContiguous', ...
+                  ['The assembled wall jumps %.3g m between stations %d and %d ' ...
+                   '(typical spacing %.3g m), so the blocks are not laid out ' ...
+                   'head-to-tail along the wall.'], ...
+                  max(wstep), find(wstep == max(wstep), 1), ...
+                  find(wstep == max(wstep), 1) + 1, median(wstep));
+        end
     end
 
     % --- 5b. orient the stations inflow -> outflow ---
-    % The block order is the mesh's, and it need not follow the flow: on this
+    % The block order is the mesh's, and it need not follow the flow: on the TTCP
     % C-grid the wall faces run from xi/c ~ 0.5 back to ~ 0.02, i.e. AGAINST it.
     % Decide physically, exactly as the wall-normal order is decided downstream —
     % project the free-stream velocity (row end here) onto the wall tangent that
@@ -410,66 +463,14 @@ function sBF = assembleBodyFitted(T, isWall)
     end
 end
 
-% --- DFP: rectilinear grid — unique x and unique y are the grid lines ---
-function sBF = assembleRectilinear(T, tol)
-
-    [xu, ~, ix] = uniquetol(T.x, tol, 'DataScale', 1);
-    [yu, ~, iy] = uniquetol(T.y, tol, 'DataScale', 1);
-    Nx = numel(xu);
-    Ny = numel(yu);
-
-    % A body-fitted or otherwise deformed grid gives every cell its own x and y,
-    % so Nx and Ny both approach the row count and Nx*Ny explodes. Catch that
-    % here: allocating nan(Ny,Nx) would otherwise ask for hundreds of GB.
-    if Nx * Ny > 4 * height(T)
-        error('importData:notRectilinear', ...
-              ['midPlane has %d rows but %d unique x and %d unique y ' ...
-               '(Nx*Ny = %.3g). The grid is not rectilinear, so it cannot be ' ...
-               'rebuilt by meshgrid — every cell carries its own coordinates. ' ...
-               'A body-fitted mesh needs assembleBodyFitted.'], ...
-              height(T), Nx, Ny, Nx * double(Ny));
+% --- local helper: distance from each point to the nearest wall face ---
+% Used only to order and group the mesh blocks, so a nearest-centre distance is
+% accurate enough even where the wall curves. Without wall rows, fall back to y.
+function d = wallDist(x, y, Tw)
+    if isempty(Tw)
+        d = y(:);  return;
     end
-    if Nx * Ny ~= height(T)
-        warning('importData:nonRectangular', ...
-                ['midPlane has %d rows but unique x * unique y = %d * %d = %d. ', ...
-                 'Grid is not fully populated; empty cells will be NaN.'], ...
-                height(T), Nx, Ny, Nx * Ny);
-    end
-
-    [Xg, Yg] = meshgrid(xu, yu);   % Ny x Nx
-    sBF.x = Xg;
-    sBF.y = Yg;
-
-    lin = sub2ind([Ny, Nx], iy, ix);
-
-    fields = {'u', 'v', 'w', 'p', 'omz'};
-    for k = 1:numel(fields)
-        f = fields{k};
-        if ~ismember(f, T.Properties.VariableNames), continue; end
-        M = nan(Ny, Nx);
-        M(lin) = T.(f);
-        sBF.(f) = M;
-    end
-
-    % --- base-flow gradients on the imported grid -----------------------
-    % Computed here so the loadBF base flow carries the same ux..wy fields as
-    % the loadFields path. differentiateField is 2nd-order on the non-uniform
-    % grid and coordinate-based (it differences sBF.x/sBF.y, not row/column
-    % indices), so the later free-stream/wall row flip in importData reorders
-    % these derivatives consistently with the velocity fields they come from.
-    %   <c>x = d<c>/dx (across columns, dim 2);  <c>y = d<c>/dy (down rows, dim 1)
-    if Nx >= 3 && Ny >= 3
-        for c = {'u', 'v', 'w'}
-            comp = c{1};
-            if ~isfield(sBF, comp), continue; end
-            sBF.([comp 'x']) = differentiateField(sBF.(comp), sBF.x, 2);
-            sBF.([comp 'y']) = differentiateField(sBF.(comp), sBF.y, 1);
-        end
-    else
-        warning('importData:gradientsSkipped', ...
-                ['Grid too small for 2nd-order base-flow gradients ', ...
-                 '(Ny=%d, Nx=%d); ux..wy not computed.'], Ny, Nx);
-    end
+    d = min(hypot(x(:) - Tw.x(:).', y(:) - Tw.y(:).'), [], 2);
 end
 
 % --- loadFields: read base flow + perturbation from an io/input/*.mat ---
