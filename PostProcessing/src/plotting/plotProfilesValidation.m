@@ -3,7 +3,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
 %   figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
-% Produces TWO figures, both with the same layout and styling (DeHNSSo = black
+% Produces THREE figures. The first two share a layout and styling (DeHNSSo = black
 % line, Experimental (PIV) = red line; BOTH carry one white-filled open circle
 % per sample point, so each curve shows its own wall-normal resolution -- the
 % black circles are the stability grid's y-nodes, the red ones the PIV
@@ -19,6 +19,27 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
 %   profiles_w_validation_broad.png  BROAD -- the whole valid domain, inlet to
 %                                    outflow-buffer start.
+%
+% and the third condenses each of those profiles to a single number, so the
+% streamwise evolution is read directly instead of station by station:
+%
+%   amplitude_w_validation.png       max_y w_rms against x/c, HNS (curve, every
+%                                    grid column up to the buffer) vs PIV (markers,
+%                                    its own stations), in two panels:
+%                                      top     TOTAL -- the quadrature sum of the
+%                                              lower panel's modes, taken the same
+%                                              way on BOTH sides (see pivTotal)
+%                                      bottom  PER SPANWISE MODE, one colour each,
+%                                              for every harmonic PIV resolved
+%                                              (w_pert_m_prof_rms_01..03 in Gen0)
+%                                    Both panels are SEMILOGY on one shared decade
+%                                    range, so exponential growth reads as a slope
+%                                    and the modes stay legible against the total.
+%                                    With valPIV = false it is drawn HNS-only.
+%
+% Everything here is the per-mode RMS the profile figures already compare, so the
+% whole set stays on one convention: the lower panel is those profiles' peaks, and
+% the upper panel is the lower one summed in quadrature.
 %
 % Both figures auto-size their y-range (autoYTop: 1.5 x the perturbation extent
 % over their stations, capped by the grid; override with inp.valYTop [mm]) and
@@ -90,9 +111,19 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
     % ---- figure 2: broad view over the whole valid domain ----
     Sb = stations(G, o, inp, []);
     if ~isempty(Sb)
-        f = plotStations(Sb, sBF, sPert, o, inp, m, uref, autoYTop(Sb, sPert, m, uref, inp));
+        yTopB = autoYTop(Sb, sPert, m, uref, inp);
+        f = plotStations(Sb, sBF, sPert, o, inp, m, uref, yTopB);
         figs(end+1) = f;
         saveFig(f, savedir, 'profiles_w_validation_broad.png', m, Sb);
+
+        % ---- figure 3: the same peaks, against x/c ----
+        % Shares the broad figure's y-window, so a peak here is the peak of the
+        % profile drawn there -- the two figures cannot disagree.
+        [f, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopB);
+        if ~isempty(f)
+            figs(end+1) = f;
+            saveAmp(f, savedir, 'amplitude_w_validation.png', m, nPIV);
+        end
     end
 end
 
@@ -486,6 +517,273 @@ function saveFig(fig, savedir, fname, m, S)
     nPIV = nnz(~cellfun(@isempty, {S.korig}));
     fprintf(['plotProfilesValidation: saved %s (fundamental mode (0,%d), ', ...
              '%d stations, %d with PIV)\n'], out, m-1, numel(S), nPIV);
+end
+
+% ======================================================================
+%  Streamwise evolution: max_y w_rms against x/c
+%
+%  One number per station instead of a profile: the peak of the same w_rms the
+%  profile figures draw, so amplitude growth (and where HNS and PIV part company)
+%  is read off a single curve. HNS is evaluated at EVERY grid column up to the
+%  outflow buffer; PIV only exists at its own stations, so it stays as markers.
+%
+%  Both peaks are taken over the broad figure's wall-normal window (yTopM), which
+%  keeps free-stream noise from winning the max and guarantees the value plotted
+%  here is the peak of the profile plotted there.
+%
+%  Returns the figure handle and how many PIV stations made it in ([] if there is
+%  no HNS curve to draw).
+% ======================================================================
+function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
+    fig = [];  nPIV = 0;
+    yTop = yTopM * 1e3;                              % the peaks are taken in mm
+    cSolver = [0 0 0];  cExp = [0.75 0.08 0.08];
+
+    ib  = colAt(G, bufferFrac(inp));
+    xcN = G.xic(1:ib) * 100;
+    xcLim = [min(xcN), max(xcN)];
+
+    % ---- HNS: total, then one curve per resolved harmonic ----
+    hrm = harmonics(o, inp, sPert);                  % harmonic indices h = 1,2,...
+    pkTot = nan(1, ib);
+    pkM   = nan(numel(hrm), ib);
+    for c = 1:ib
+        ymm = G.wallDist(c) * 1e3;
+        pkTot(c) = peakIn(hnsTotalRms(sPert, c, uref, hrm), ymm, yTop);
+        for i = 1:numel(hrm)
+            wr = abs(squeeze(sPert.w(hrm(i)+1,:,c))) / sqrt(2) * uref;
+            pkM(i,c) = peakIn(wr(:), ymm, yTop);
+        end
+    end
+    if ~any(isfinite(pkTot))
+        warning('plotProfilesValidation:noAmplitude', ...
+                'No finite w_rms peak along the domain; skipping the amplitude figure.');
+        return;
+    end
+
+    % ---- PIV: the same two quantities at the PIV stations ----
+    [xcT, pkPT] = pivTotal(o, inp, hrm, yTop, xcLim);
+    xcP = cell(1, numel(hrm));  pkP = cell(1, numel(hrm));
+    for i = 1:numel(hrm)
+        [xcP{i}, pkP{i}] = pivPeaks(o, inp, hrm(i), yTop, xcLim);
+    end
+    nPIV = numel(xcT);
+
+    % ---- draw: total on top, the modes that make it up underneath ----
+    fig = figure('Name', 'Amplitude vs x', 'Color', 'w', 'Position', [60 60 780 760]);
+    t = tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    % top: total RMS
+    ax1 = nexttile(t); hold(ax1, 'on');
+    hN = plot(ax1, xcN, pkTot, '-', 'Color', cSolver, 'LineWidth', 1.5);
+    hs = hN;  labs = {'\textrm{HNS (DeHNSSo)}'};
+    if nPIV > 0
+        hs(end+1) = plot(ax1, xcT, pkPT, '-o', 'Color', cExp, 'LineWidth', 1.1, ...
+                         'MarkerSize', 5, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', cExp);
+        labs{end+1} = '\textrm{PIV}';
+    end
+    % Log ranges: the panels share their CEILING (the total bounds every mode, so
+    % a common top makes the two directly comparable) but each keeps its own
+    % floor. A fully shared range would hand the top panel the four empty decades
+    % the harmonics need near the inlet.
+    hiAll = ampCeil([pkTot(:); pkPT(:); pkM(:); cat(2, pkP{:}).']);
+    yl1 = ampLims([pkTot(:); pkPT(:)],            hiAll);
+    yl2 = ampLims([pkM(:);   cat(2, pkP{:}).'],   hiAll);
+    local_style(ax1);  logY(ax1, yl1);
+    xlim(ax1, xcLim);
+    set(ax1, 'XTickLabel', []);
+    ylabel(ax1, '$\max_y w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    title(ax1, sprintf('\\textrm{Total~}$(%s$\\textrm{, in quadrature)}', modeListTex(hrm)), ...
+          'Interpreter', 'latex', 'FontSize', 12);
+    legend(ax1, hs, labs, 'Interpreter', 'latex', 'Location', 'northwest', 'FontSize', 11);
+
+    % bottom: per mode, colour = mode, line = HNS, circles = PIV
+    ax2 = nexttile(t); hold(ax2, 'on');
+    col = modeColors(numel(hrm));
+    hM  = gobjects(1, numel(hrm));  labM = cell(1, numel(hrm));
+    for i = 1:numel(hrm)
+        hM(i)  = plot(ax2, xcN, pkM(i,:), '-', 'Color', col(i,:), 'LineWidth', 1.5);
+        labM{i} = sprintf('$(0,%d)$', hrm(i));
+        if ~isempty(xcP{i})
+            plot(ax2, xcP{i}, pkP{i}, ':o', 'Color', col(i,:), 'LineWidth', 1.0, ...
+                 'MarkerSize', 5, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', col(i,:));
+        end
+    end
+    local_style(ax2);  logY(ax2, yl2);
+    xlim(ax2, xcLim);
+    xlabel(ax2, '$x/c \ [\%]$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax2, '$\max_y w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    title(ax2, '\textrm{Per spanwise mode}', 'Interpreter', 'latex', 'FontSize', 12);
+
+    % Legend: the two style keys (neutral black) then one entry per mode colour,
+    % in ONE horizontal row under the panel. A multi-column box inside the axes
+    % broke the alignment -- column-major filling put a mode under the style keys,
+    % mixing the two kinds of entry -- and on a log axis it also sat on the curves.
+    kLine = plot(ax2, NaN, NaN, '-', 'Color', cSolver, 'LineWidth', 1.5);
+    kh = kLine;  kl = {'\textrm{HNS}'};
+    if nPIV > 0
+        kh(end+1) = plot(ax2, NaN, NaN, ':o', 'Color', cSolver, 'LineWidth', 1.0, ...
+                         'MarkerSize', 5, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', cSolver);
+        kl{end+1} = '\textrm{PIV}';
+    end
+    legend(ax2, [kh, hM], [kl, labM], 'Interpreter', 'latex', 'FontSize', 10, ...
+           'Orientation', 'horizontal', 'Location', 'southoutside', 'Box', 'off');
+
+    title(t, sprintf('\\textrm{Streamwise evolution~}$(\\max_y$\\textrm{~over~}$y \\leq %.2f$\\textrm{~mm)}', yTop), ...
+          'Interpreter', 'latex', 'FontSize', 13);
+end
+
+% harmonics to draw in the lower panel: those PIV resolves (w_pert_m_prof_rms_XX)
+% that also have a row in sPert. With no PIV file, or with inp.valPIV = false, the
+% figure is HNS-only and falls back to the solver's own first few modes -- drawing
+% all of them (17 rows in a typical run) would be unreadable. Same row <-> harmonic
+% mapping as everywhere else here: harmonic h is row h+1, row 1 being the (0,0)
+% mean-flow distortion.
+function h = harmonics(o, inp, sPert)
+    hmax = size(sPert.w, 1) - 1;
+    if hmax < 1; h = []; return; end
+    if isempty(o) || ~usePIV(inp)
+        h = 1:min(3, hmax);  return;            % no PIV: the first few, not all 16
+    end
+    h = [];
+    for i = 1:hmax
+        if isfield(o, sprintf('w_pert_m_prof_rms_%02d', i))
+            h(end+1) = i;   %#ok<AGROW>
+        end
+    end
+    if isempty(h); h = 1:min(3, hmax); end
+end
+
+% total perturbation RMS profile at one column [m/s]: the modes are orthogonal in
+% z (distinct beta), so their z-RMS values add in quadrature.
+%
+% Summed over the SAME harmonics as the PIV total (hrm), not over every row the
+% solver carries. Both sides are then truncated alike, which is what makes the
+% two totals comparable -- and the (0,0) mean-flow distortion stays out either
+% way, being part of the mean rather than a fluctuation.
+function wr = hnsTotalRms(sPert, c, uref, hrm)
+    W  = abs(squeeze(sPert.w(hrm+1,:,c))) / sqrt(2) * uref;   % numel(hrm) x Ny
+    if isvector(W); W = W(:).'; end
+    wr = sqrt(sum(W.^2, 1, 'omitnan')).';
+end
+
+% PIV peak per station for ONE harmonic, restricted to the same wall-normal
+% window and x/c range. Empty when PIV has no data for that harmonic.
+function [xc, pk] = pivPeaks(o, inp, h, yTop, xcLim)
+    xc = [];  pk = [];
+    fn = sprintf('w_pert_m_prof_rms_%02d', h);
+    yn = sprintf('y_prof_rms_%02d', h);
+    if ~usePIV(inp) || isempty(o) || ~isfield(o, fn) || ~isfield(o, yn); return; end
+
+    for k = 1:numel(o.xc)
+        x = double(o.xc{k}(1));
+        if x < xcLim(1) || x > xcLim(2); continue; end
+        p = peakIn(double(o.(fn){k}(:)), double(o.(yn){k}(:)), yTop);   % PIV y is in mm
+        if ~isfinite(p); continue; end
+        xc(end+1) = x;   %#ok<AGROW>
+        pk(end+1) = p;   %#ok<AGROW>
+    end
+    [xc, ord] = sort(xc);  pk = pk(ord);
+end
+
+% PIV total RMS per station: the quadrature sum of the SAME per-mode profiles the
+% lower panel draws (w_pert_m_prof_rms_XX), on their shared y grid -- the modes
+% carry distinct beta, so this is their combined z-RMS.
+%
+% Deliberately NOT the z-RMS of (w_m_tot - w_m_mean). That is the full measured
+% fluctuation, so it also carries whatever PIV did not decompose, including the
+% noise floor: on Gen0/Case0 it runs ~15% above this sum at x/c = 12%, converging
+% to under 1% by x/c = 39%. HNS has no counterpart for that excess, and the
+% profile figures compare mode by mode, so the amplitude figure does the same:
+% both sides truncated at the same harmonics, top panel = sum of the bottom one.
+function [xc, pk] = pivTotal(o, inp, hrm, yTop, xcLim)
+    xc = [];  pk = [];
+    if ~usePIV(inp) || isempty(o); return; end
+
+    for k = 1:numel(o.xc)
+        x = double(o.xc{k}(1));
+        if x < xcLim(1) || x > xcLim(2); continue; end
+
+        r = [];  y = [];
+        for h = hrm
+            fn = sprintf('w_pert_m_prof_rms_%02d', h);
+            yn = sprintf('y_prof_rms_%02d', h);
+            if ~isfield(o, fn) || ~isfield(o, yn); continue; end
+            v = double(o.(fn){k}(:));  yv = double(o.(yn){k}(:));
+            if isempty(r)
+                r = v.^2;  y = yv;
+            elseif isequal(size(v), size(r))
+                r = r + v.^2;
+            else
+                % different sampling for this harmonic: bring it onto the first
+                % harmonic's grid rather than dropping it
+                r = r + interp1(yv, v, y, 'linear', 0).^2;
+            end
+        end
+        if isempty(r); continue; end
+
+        p = peakIn(sqrt(r), y, yTop);      % PIV y is in mm
+        if ~isfinite(p); continue; end
+        xc(end+1) = x;   %#ok<AGROW>
+        pk(end+1) = p;   %#ok<AGROW>
+    end
+    [xc, ord] = sort(xc);  pk = pk(ord);
+end
+
+% "(0,1)-(0,3)" for a contiguous run of harmonics, "(0,1), (0,3)" otherwise
+function s = modeListTex(hrm)
+    if numel(hrm) > 2 && isequal(hrm(:).', hrm(1):hrm(end))
+        s = sprintf('(0,%d)\\textrm{--}(0,%d)', hrm(1), hrm(end));
+    else
+        s = strjoin(arrayfun(@(h) sprintf('(0,%d)', h), hrm, 'UniformOutput', false), '$, $');
+    end
+end
+
+% one distinguishable colour per mode (fundamental first). Deliberately NOT black
+% or the PIV red: in the lower panel those two carry the HNS/PIV distinction
+% (line vs circles), so a mode must not borrow either colour.
+function c = modeColors(n)
+    base = [0.00 0.45 0.70; 0.85 0.45 0.00; 0.00 0.55 0.30; 0.50 0.20 0.60; ...
+            0.35 0.35 0.35; 0.00 0.65 0.75];
+    if n <= size(base,1); c = base(1:max(n,1),:); else; c = [base; lines(n - size(base,1))]; end
+end
+
+% Log y-range for one amplitude panel, as whole decades around its data, with the
+% ceiling passed in so both panels share it.
+%
+% The span is capped at four decades: an HNS harmonic can start at round-off near
+% the inlet, and letting that set the floor would squash the part of the figure
+% anyone reads. Anything below the floor simply runs off the bottom, which is the
+% honest way to show it on a log axis.
+function yl = ampLims(v, hi)
+    v = v(isfinite(v) & v > 0);
+    if isempty(v); yl = [hi/1e3, hi]; return; end
+    lo = 10^floor(log10(max(min(v), hi/1e4)));
+    if lo >= hi; lo = hi/10; end
+    yl = [lo, hi];
+end
+
+% next decade above the largest finite peak (the ceiling both panels share)
+function hi = ampCeil(v)
+    v = v(isfinite(v) & v > 0);
+    if isempty(v); hi = 1; else; hi = 10^ceil(log10(max(v))); end
+end
+
+% log y-axis with the decade grid (minor grid included: on a log axis the decades
+% alone are too coarse to read a growth rate off)
+function logY(ax, yl)
+    set(ax, 'YScale', 'log', 'YMinorGrid', 'on', 'MinorGridAlpha', 0.12);
+    ylim(ax, yl);
+end
+
+function saveAmp(fig, savedir, fname, m, nPIV)
+    if isempty(savedir); return; end
+    if ~exist(savedir, 'dir'); mkdir(savedir); end
+    out = fullfile(savedir, fname);
+    set(findall(fig, 'Type', 'axes'), 'Toolbar', []);
+    exportgraphics(fig, out, 'Resolution', 150);
+    fprintf(['plotProfilesValidation: saved %s (fundamental mode (0,%d), ', ...
+             '%d PIV stations)\n'], out, m-1, nPIV);
 end
 
 % ======================================================================
