@@ -15,7 +15,7 @@ function plotReynoldsOrrDecomp(sRO, sBF, inp, savedir)
     end
     if ~exist(savedir, 'dir'); mkdir(savedir); end
 
-    X = sRO.x;  Y = sRO.y;
+    X = sRO.s;  Y = sRO.n;
     % which computed modes to plot: inp.modeIdx (original sPert indices); [] -> all
     if isfield(inp,'modeIdx') && ~isempty(inp.modeIdx) && isfield(sRO,'modeNo')
         sel = find(ismember(sRO.modeNo, inp.modeIdx(:).'));
@@ -65,8 +65,8 @@ function plotReynoldsOrrDecomp(sRO, sBF, inp, savedir)
             set(ax, 'TickLabelInterpreter', 'latex');
             xlim(ax, [x0 xEnd]);  ylim(ax, [y0 yTop]);
             title(ax, sprintf('$%s$', labs{c}), 'Interpreter', 'latex');
-            if c == 1 || c == 3; ylabel(ax, '$y / \delta_0$', 'Interpreter', 'latex'); end
-            if c == 3 || c == 4; xlabel(ax, '$x / \delta_0$', 'Interpreter', 'latex'); end
+            if c == 1 || c == 3; ylabel(ax, '$n / \delta_0$', 'Interpreter', 'latex'); end
+            if c == 3 || c == 4; xlabel(ax, '$S^{*} / \delta_0$', 'Interpreter', 'latex'); end
         end
 
         % one shared colorbar (LaTeX scientific notation), scale led by I2

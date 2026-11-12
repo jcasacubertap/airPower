@@ -59,8 +59,8 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
             local_sciColorbar(cb, sprintf('$|%s|_{%s} / u_\\infty$', sym, ms));
             set(gca, 'TickLabelInterpreter', 'latex');
             xlabel('$S^{*} / \delta_0$', 'Interpreter', 'latex');
-            ylabel('$y / \delta_0$', 'Interpreter', 'latex');
-            title(sprintf('\\textrm{Perturbation shape}\\ \\ $|%s|_{%s}(x,y)$', sym, ms), ...
+            ylabel('$n / \delta_0$', 'Interpreter', 'latex');
+            title(sprintf('\\textrm{Perturbation shape}\\ \\ $|%s|_{%s}(s,n)$', sym, ms), ...
                   'Interpreter', 'latex');
             xlim(xl);  ylim(yl);
             figs(end+1) = f; %#ok<AGROW>
@@ -88,7 +88,7 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
         plot(ax1, x, Au, '-', 'LineWidth', 1.5, 'Color', colors(i,:));
     end
     set(ax1,'YScale','log'); grid(ax1,'on'); box(ax1,'on'); set(ax1,'TickLabelInterpreter','latex');
-    ylabel(ax1, '$\max_y\,|\tilde{u}| / u_\infty$', 'Interpreter', 'latex');
+    ylabel(ax1, '$\max_n\,|\tilde{u}| / u_\infty$', 'Interpreter', 'latex');
     title(ax1, '\textrm{Chordwise amplitude of}\ \ $\tilde{u}$', 'Interpreter', 'latex');
     xlim(ax1, xl);
     if multi; legend(ax1, leg, 'Interpreter', 'latex', 'Location', 'best'); end
@@ -104,7 +104,7 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
     end
     set(ax2,'YScale','log'); grid(ax2,'on'); box(ax2,'on'); set(ax2,'TickLabelInterpreter','latex');
     xlabel(ax2, '$S^{*} / \delta_0$', 'Interpreter', 'latex');
-    ylabel(ax2, '$\max_y\,\frac{1}{2}(|\tilde{u}|^2+|\tilde{v}|^2+|\tilde{w}|^2) / u_\infty^2$', ...
+    ylabel(ax2, '$\max_n\,\frac{1}{2}(|\tilde{u}|^2+|\tilde{v}|^2+|\tilde{w}|^2) / u_\infty^2$', ...
            'Interpreter', 'latex');
     title(ax2, 'Chordwise amplitude of the perturbation energy', 'Interpreter', 'latex');
     xlim(ax2, xl);

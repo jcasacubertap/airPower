@@ -19,7 +19,7 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 %
 % INPUTS (from importData, loadMode='loadFields'):
 %   sBF   base flow on the stability grid, Ny x Nx, rows free-stream(1,:)->wall(end,:):
-%         .x .y (meshgrid), .u .v .w, gradients .ux .uy .vx .vy .wx .wy
+%         .s .n (wall-fitted coordinates), .u .v .w, gradients .ux .uy .vx .vy .wx .wy
 %   sPert perturbation modes (full, amplitude-scaled fields from importData):
 %         .u .v .w  (Nmode x Ny x Nx) complex perturbation (NOT normalized)
 %         .beta     (1 x Nmode)       spanwise wavenumber of each mode
@@ -34,10 +34,10 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
 %                            I1 normal-normal, I2 tang-normal, I3 normal-tang,
 %                            I4 tang-tang.  I1+I2+I3+I4 = P.
 %   .I2a..I2f, .I4a..I4f     per-base-flow-gradient sub-terms of I2 and I4
-%   .x .y                    the grid (Ny x Nx)
+%   .s .n                    the grid (Ny x Nx), as sBF.s/.n
 
     % ---- validate inputs ----
-    need = {'x','y','u','v','w','ux','uy','vx','vy','wx','wy'};
+    need = {'s','n','u','v','w','ux','uy','vx','vy','wx','wy'};
     miss = need(~isfield(sBF, need));
     if ~isempty(miss)
         error('reynoldsOrr:sBF', 'sBF missing field(s): %s', strjoin(miss, ', '));
@@ -61,7 +61,7 @@ function sRO = reynoldsOrrProdTerms(sBF, sPert, inp)
     M = numel(modeIdx);
 
     % ---- production field per mode ----
-    sRO.x = sBF.x;  sRO.y = sBF.y;
+    sRO.s = sBF.s;  sRO.n = sBF.n;
     sRO.beta    = beta(modeIdx);
     sRO.modeNo  = modeIdx;        % original sPert index of each computed mode (for plot selection)
     sRO.P       = zeros(Ny, Nx, M);

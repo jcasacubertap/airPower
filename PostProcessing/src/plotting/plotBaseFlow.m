@@ -6,9 +6,9 @@ function fig = plotBaseFlow(sBF, inp, savedir)
 %
 % One stacked panel per available field among {u, v, w, p} (loadFields provides
 % u,v,w; loadBF adds p). Base-flow quantities carry a subscript B. Data are
-% plotted as-is; only the labels reflect the units:
-%   loadFields (DeHNSSo) -> non-dimensional: x/delta_0, u_B/u_infty, ...
-%   loadBF     (OpenFOAM) -> dimensional:    x [m], u_B [m/s], p_B [m^2/s^2]
+% plotted as-is; only the labels reflect the units, read from sBF.units:
+%   'nondim' (loadFields, DeHNSSo) -> S*/delta_0, n/delta_0, u_B/u_infty, ...
+%   'SI'     (loadBF, OpenFOAM)    -> S* [m], n [m], u_B [m/s], p_B [m^2/s^2]
 % (OpenFOAM pressure is kinematic, p/rho, hence m^2/s^2.)
 %
 % Save behaviour: savedir non-empty -> PNG written there (terminal/dispatcher);
@@ -16,38 +16,27 @@ function fig = plotBaseFlow(sBF, inp, savedir)
 
     if nargin < 3; savedir = ''; end
 
-    nd = isfield(inp, 'loadMode') && strcmpi(inp.loadMode, 'loadFields');
+    nd = isfield(sBF, 'units') && strcmpi(sBF.units, 'nondim');
 
     if nd
-        xlab = '$S^{*} / \delta_0$';  ylab = '$y / \delta_0$';
+        xlab = '$S^{*} / \delta_0$';  ylab = '$n / \delta_0$';
         catalog = { ...
             'u', '$u_{\mathrm{B}} / u_\infty$'; ...
             'v', '$v_{\mathrm{B}} / u_\infty$'; ...
             'w', '$w_{\mathrm{B}} / u_\infty$'; ...
             'p', '$p_{\mathrm{B}} / (\rho\, u_\infty^2)$'};
-    elseif isfield(sBF, 's')
-        % loadBF on the body-fitted TTCP mesh: coordinates are wall-fitted and
-        % dimensional. S* is measured from the first exported station, not the LE.
+    else
+        % SI: S* is measured from the first exported station, not the LE.
         xlab = '$S^{*} \; [\mathrm{m}]$';  ylab = '$n \; [\mathrm{m}]$';
         catalog = { ...
             'u', '$u_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
             'v', '$v_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
             'w', '$w_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
             'p', '$p_{\mathrm{B}} \; [\mathrm{m^2/s^2}]$'};
-    else
-        xlab = '$x \; [\mathrm{m}]$';  ylab = '$y \; [\mathrm{m}]$';
-        catalog = { ...
-            'u', '$u_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
-            'v', '$v_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
-            'w', '$w_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
-            'p', '$p_{\mathrm{B}} \; [\mathrm{m^2/s^2}]$'};
     end
 
-    % Grid-size reference: whichever coordinate array this loader supplied.
-    if     isfield(sBF, 'x'); gsz = size(sBF.x);   % rectilinear grid
-    elseif isfield(sBF, 's'); gsz = size(sBF.s);   % wall-fitted grid
-    else;                     gsz = [0 0];
-    end
+    % Grid-size reference: both loaders supply the wall-fitted pair.
+    if isfield(sBF, 's'); gsz = size(sBF.s); else; gsz = [0 0]; end
 
     have = false(size(catalog,1),1);
     for k = 1:size(catalog,1)

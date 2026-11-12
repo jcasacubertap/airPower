@@ -16,7 +16,7 @@ function [xl, yl, bufFrac] = plotWindow(X, Y, inp)
 %    load modes are deliberately NOT reconciled to a common unit, because each is
 %    plotted in the system it is computed in -- axes and legends included:
 %
-%       loadFields -> inp.plot.yMaxFields, in y/delta_0
+%       loadFields -> inp.plot.yMaxFields, in n/delta_0
 %                     (the stability analysis is run non-dimensionally)
 %       loadBF     -> inp.plot.yMaxBF,     in metres
 %                     (the OpenFOAM midPlane is dimensional)

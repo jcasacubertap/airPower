@@ -1,5 +1,5 @@
 function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
-% plotProfilesValidation  Dimensional w-profile comparison vs PIV (DeHNSSo).
+% plotProfilesValidation  w-profile comparison vs PIV (DeHNSSo), in delta_0 and u_inf.
 %
 %   figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
@@ -7,7 +7,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 % line, Experimental (PIV) = red line; BOTH carry one white-filled open circle
 % per sample point, so each curve shows its own wall-normal resolution -- the
 % black circles are the stability grid's y-nodes, the red ones the PIV
-% measurement points. w [m/s] vs wall distance in MILLIMETRES, LaTeX serif;
+% measurement points. w/u_inf vs wall distance n/delta_0, LaTeX serif;
 % a 2 x nStation tiledlayout with one legend under
 % the whole figure -- top row the MEAN flow w (base flow + the (0,0) mean-flow
 % distortion of the stability solution, see meanW; the base flow alone is kept as
@@ -23,7 +23,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 % and the third condenses each of those profiles to a single number, so the
 % streamwise evolution is read directly instead of station by station:
 %
-%   amplitude_w_validation.png       max_y w_rms against x/c, HNS (curve, every
+%   amplitude_w_validation.png       max_n w_rms against x/c, HNS (curve, every
 %                                    grid column up to the buffer) vs PIV (markers,
 %                                    its own stations), in two panels:
 %                                      top     TOTAL -- the quadrature sum of the
@@ -42,7 +42,7 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 % the upper panel is the lower one summed in quadrature.
 %
 % Both figures auto-size their y-range (autoYTop: 1.5 x the perturbation extent
-% over their stations, capped by the grid; override with inp.valYTop [mm]) and
+% over their stations, capped by the grid; override with inp.valYTop [delta_0]) and
 % SHARE it across both rows, so the eye carries vertically from the mean flow to
 % the perturbation it drives.
 % They also share an x-limit along each row (inp.valShareX, default true), which
@@ -66,28 +66,50 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %
 % The x/c <-> column mapping is case-specific (see gridMap):
 %   DFP  (flat reference plate):  column x_DFP -> S = x_DFP + xInlet -> x/c via the
-%        airfoilFlowData BL.S/BL.x/BL.c table. Wall distance is the grid's
-%        wall-normal coordinate.
+%        airfoilFlowData BL.S/BL.x/BL.c table.
 %   TTCP (curved airfoil wall):   the stability-grid wall row IS the airfoil
 %        surface, so each column's x/c is recovered by the inverse rigid transform
-%        (undo AoA rotation + centre offset) of its physical wall point. Wall
-%        distance is the arc-length up the (body-fitted) grid column.
+%        (undo AoA rotation + centre offset) of its physical wall point.
+% Wall distance is sBF.n for both, the arc length up the grid column.
+%
+% With inp.validation false, or without an airfoil (no geometry in inp / no
+% airfoilFlowData, an unknown caseType, or no lref/Uref in the data) there is no
+% x/c, and so nothing to match PIV stations against. The script then uses s: stations are spread
+% evenly in S*/delta_0, titles and the amplitude x-axis are in S*/delta_0, PIV
+% is left out, and the zoom figure (its window is an x/c range) is skipped. The
+% files then drop the '_validation' tag: profiles_w_broad.png, amplitude_w.png.
+%
+% Units: everything is drawn in the units of the DeHNSSo data (sBF.units =
+% 'nondim'): lengths in delta_0, velocities in u_inf. The PIV is brought onto
+% them once, on load, with the run's own scales (sBF.ref.lref, sBF.ref.Uref);
+% the x/c map is the only place the physical scale enters, since the airfoil
+% geometry it inverts is in metres.
 
     figs = gobjects(0);
     if nargin < 4; savedir = ''; end
 
-    if ~isfield(sPert,'uref') || ~isfield(sPert,'lref') || isempty(sPert.uref) || isempty(sPert.lref)
+    hasRef = isfield(sBF,'ref') && all(isfield(sBF.ref, {'Uref','lref'}));
+    if ~hasRef && isfield(inp, 'validation') && logical(inp.validation)
         warning('plotProfilesValidation:noRef', ...
-                'StabGrid Uref/lref missing; cannot dimensionalize DeHNSSo data.'); return;
+                ['No Uref/lref in the data: no x/c and no PIV (both need the ', ...
+                 'physical scale); plotting DeHNSSo against S*/delta_0.']);
     end
-    uref = sPert.uref;  lref = sPert.lref;
+    if ~hasRef
+        lref = [];
+    else
+        uref = sBF.ref.Uref;  lref = sBF.ref.lref;
+    end
 
-    % ---- column -> x/c and column -> wall-distance maps (case-specific) ----
+    % ---- column -> station coordinate (x/c, or s as fallback) and wall distance ----
     G = gridMap(sBF, inp, lref);
-    if isempty(G); return; end
 
     % ---- PIV Gen/Case data (optional: the broad figure works without it) ----
-    o = loadPIV(inp);
+    % Only with x/c: PIV stations are labelled by x/c, so without it there is
+    % nothing to match them against.
+    o = [];
+    if G.useXc
+        o = pivToNondim(loadPIV(inp), uref, lref);
+    end
 
     % ---- fundamental mode (or the first in modeIdx) ----
     Nmode = size(sPert.w, 1);
@@ -99,11 +121,14 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
     m = max(2, min(m, Nmode));                 % (0,0) has no PIV counterpart
 
     % ---- figure 1: zoom on the requested x/c window ----
-    % The y-range is auto-sized here too (it used to be a hard-coded 4 mm, which
-    % left two thirds of every panel empty); see autoYTop.
-    Sz = stations(G, o, inp, xcZoom(inp));
+    % The y-range is auto-sized here too (a hard-coded height left two thirds of
+    % every panel empty); see autoYTop.
+    tag = '';  if G.useXc; tag = '_validation'; end   % file names
+
+    Sz = [];
+    if G.useXc; Sz = stations(G, o, inp, xcZoom(inp)); end   % window is in x/c
     if ~isempty(Sz)
-        f = plotStations(Sz, sBF, sPert, o, inp, m, uref, autoYTop(Sz, sPert, m, uref, inp));
+        f = plotStations(Sz, sBF, sPert, o, inp, m, autoYTop(Sz, sPert, m, inp));
         figs(end+1) = f;
         saveFig(f, savedir, 'profiles_w_validation.png', m, Sz);
     end
@@ -111,18 +136,18 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
     % ---- figure 2: broad view over the whole valid domain ----
     Sb = stations(G, o, inp, []);
     if ~isempty(Sb)
-        yTopB = autoYTop(Sb, sPert, m, uref, inp);
-        f = plotStations(Sb, sBF, sPert, o, inp, m, uref, yTopB);
+        yTopB = autoYTop(Sb, sPert, m, inp);
+        f = plotStations(Sb, sBF, sPert, o, inp, m, yTopB);
         figs(end+1) = f;
-        saveFig(f, savedir, 'profiles_w_validation_broad.png', m, Sb);
+        saveFig(f, savedir, sprintf('profiles_w%s_broad.png', tag), m, Sb);
 
-        % ---- figure 3: the same peaks, against x/c ----
+        % ---- figure 3: the same peaks, against x/c (or S*/delta_0) ----
         % Shares the broad figure's y-window, so a peak here is the peak of the
         % profile drawn there -- the two figures cannot disagree.
-        [f, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopB);
+        [f, nPIV] = plotAmplitude(G, sPert, o, inp, m, yTopB);
         if ~isempty(f)
             figs(end+1) = f;
-            saveAmp(f, savedir, 'amplitude_w_validation.png', m, nPIV);
+            saveAmp(f, savedir, sprintf('amplitude_w%s.png', tag), m, nPIV);
         end
     end
 end
@@ -142,80 +167,91 @@ function o = loadPIV(inp)
     o = load(fullfile(valdir, mats(1).name)).output;
 end
 
+% PIV onto the DeHNSSo scales: wall distances [mm] -> delta_0, velocities
+% [m/s] -> u_inf. Done once, here, so every comparison below is like for like.
+% Only the fields this file reads are converted; x/c is already unit-free.
+function o = pivToNondim(o, uref, lref)
+    if isempty(o); return; end
+    fn = fieldnames(o);
+    lenF = fn(strcmp(fn, 'y') | startsWith(fn, 'y_prof_rms_'));
+    velF = fn(strcmp(fn, 'w_m_mean') | startsWith(fn, 'w_pert_m_prof_rms_'));
+    for f = lenF.';  o.(f{1}) = cellfun(@(v) double(v) / (lref*1e3), o.(f{1}), 'UniformOutput', false); end
+    for f = velF.';  o.(f{1}) = cellfun(@(v) double(v) / uref,        o.(f{1}), 'UniformOutput', false); end
+end
+
 % ======================================================================
-%  Column maps: x/c per column, and wall distance [m] up a given column
+%  Column maps: station coordinate per column, and wall distance up a column
 %
-%  G.xic       1 x Nx, chord fraction of each grid column [-]
-%  G.sd0       1 x Nx, streamwise wall arc-length from the inlet, in delta_0
+%  G.useXc     true when the columns could be mapped to x/c (an airfoil is known)
+%  G.pos       1 x Nx station coordinate the figures select and plot by:
+%              x/c [%] when useXc, else S*/delta_0
+%  G.posLabel  its axis label;  G.posFmt  its number format in panel titles
+%  G.sd0       1 x Nx, wall arc length sBF.s (from the base-flow source), in delta_0
 %              (same S*/delta_0 the plotProfiles u-figure titles use)
-%  G.wallDist  @(c) -> Ny x 1 wall distance [m] for column c
+%  G.wallDist  @(c) -> Ny x 1 wall distance n for column c [delta_0]
 %  G.Nx        number of columns
 % ======================================================================
 function G = gridMap(sBF, inp, lref)
-    G = [];
+    G.sd0      = sBF.s(end,:);                % S* from importData, in delta_0
+    G.wallDist = @(c) sBF.n(:, c);            % importData's n (arc length up the column)
+    G.Nx       = numel(G.sd0);
+
+    xic = [];
+    validate = isfield(inp, 'validation') && ~isempty(inp.validation) && logical(inp.validation);
+    if validate && ~isempty(lref)
+        xic = chordFraction(sBF, inp, lref);
+    end
+    G.useXc = ~isempty(xic);
+    if G.useXc
+        G.pos = 100 * xic;   G.posLabel = '$x/c \ [\%]$';        G.posFmt = '%.1f';
+    else
+        G.pos = G.sd0;       G.posLabel = '$S^{*} / \delta_0$';   G.posFmt = '%.0f';
+    end
+end
+
+% x/c of each column from the airfoil the case was built on, or [] when no
+% airfoil is known (the caller then falls back to s). Case-specific:
+%   DFP   column x_DFP [m] -> S = x_DFP + xInlet -> x (chordwise) -> x/c, via the
+%         airfoilFlowData arc-length table (the inverse of the forward map).
+%   TTCP  the wall row IS the airfoil surface: undo the AoA rotation and centre
+%         offset of each wall point, using the airfoil geometry in inp.
+function xic = chordFraction(sBF, inp, lref)
+    xic = [];
+    if ~isfield(inp, 'caseType'); return; end
     switch upper(inp.caseType)
         case 'DFP'
-            % x/c from the airfoilFlowData arc-length table: column x_DFP [m]
-            % -> S = x_DFP + xInlet -> x (chordwise) -> x/c. This is the inverse
-            % of the forward x/c -> x_DFP map, so nearest-column lookups done in
-            % x/c space land on the same columns as before.
             fd = dir(fullfile(inp.airPowerRoot, 'PreProcessing', 'io', 'airfoilFlowData', '*.mat'));
-            if isempty(fd)
-                warning('plotProfilesValidation:noBL', 'No airfoilFlowData .mat for x/c<->S.'); return;
+            if isempty(fd) || ~isfield(inp, 'xInlet')
+                warning('plotProfilesValidation:noBL', ...
+                        'No airfoilFlowData .mat / xInlet for x/c; falling back to S*.');
+                return;
             end
             BL = load(fullfile(fd(1).folder, fd(1).name)).BL;
             x_ref = double(BL.x(:));  S_ref = double(BL.S(:));  c_ref = double(BL.c);
-
-            xg    = sBF.x(1,:) * lref;                 % columns in physical x_DFP [m]
+            xg     = sBF.geom.X(end,:) * lref;        % columns in physical x_DFP [m]
             xchord = interp1(S_ref, x_ref, xg + inp.xInlet, 'linear', 'extrap');
-            G.xic = xchord(:).' / c_ref;
-
-            G.sd0 = sBF.x(1,:);                        % flat wall: x from the inlet IS S*, in delta_0
-
-            y_m = sBF.y(:,1) * lref;                   % flat wall: same for every column
-            G.wallDist = @(c) y_m;
+            xic    = xchord(:).' / c_ref;
 
         case 'TTCP'
             req = {'airfoilChord','airfoilAlphaDeg','airfoilXCenter','airfoilYCenter'};
-            for r = req
-                if ~isfield(inp, r{1})
-                    warning('plotProfilesValidation:noGeom', ...
-                            ['TTCP validation needs airfoil geometry (%s) from inputs.jl. ', ...
-                             'Re-generate inputs_gen.m (julia run.jl PostProcessing config).'], r{1});
-                    return;
-                end
+            if ~all(isfield(inp, req))
+                warning('plotProfilesValidation:noGeom', ...
+                        ['No airfoil geometry in inp (inputs.jl: airfoilChord/AlphaDeg/', ...
+                         'XCenter/YCenter); falling back to S*.']);
+                return;
             end
             chord = inp.airfoilChord;  xC = inp.airfoilXCenter;  yC = inp.airfoilYCenter;
             ca = cosd(inp.airfoilAlphaDeg);  sa = sind(inp.airfoilAlphaDeg);
-
-            X = sBF.x * lref;  Y = sBF.y * lref;       % physical grid [m], wall at row end
-            Xw = X(end,:);  Yw = Y(end,:);             % airfoil surface (wall row)
-
+            Xw = sBF.geom.X(end,:) * lref;  Yw = sBF.geom.Y(end,:) * lref;   % wall [m]
             % Forward map is x = ca*xb + sa*yb + xC with xb = (x/c - 0.5)*chord.
             % Undo the rigid part (rotation + offset) to recover xb, hence x/c; the
             % airfoil thickness (yb) drops out — it is baked into the wall point.
-            G.xic = (ca*(Xw - xC) - sa*(Yw - yC)) / chord + 0.5;
-
-            % S*/delta_0: arc-length along the wall from the inlet column, in
-            % delta_0 -- sBF.x/sBF.y are already normalized, so no lref here.
-            % Same construction as plotCoords, so the two figures agree.
-            G.sd0 = [0, cumsum(hypot(diff(sBF.x(end,:)), diff(sBF.y(end,:))))];
-
-            % wall-normal distance up a column: arc-length from the wall (row end)
-            G.wallDist = @(c) wallArc(X(:,c), Y(:,c));
+            xic = (ca*(Xw - xC) - sa*(Yw - yC)) / chord + 0.5;
 
         otherwise
             warning('plotProfilesValidation:notWired', ...
-                    'w-vs-PIV station mapping is only wired for DFP/TTCP (got ''%s'').', inp.caseType);
-            return;
+                    'No x/c mapping for caseType ''%s''; falling back to S*.', inp.caseType);
     end
-    G.Nx = numel(G.xic);
-end
-
-% arc-length up one grid column, 0 at the wall (row end)
-function n = wallArc(Xc, Yc)
-    seg = hypot(diff(Xc), diff(Yc));               % (Ny-1) x 1, between-row lengths
-    n   = [flipud(cumsum(flipud(seg))); 0];        % Ny x 1
 end
 
 % ======================================================================
@@ -238,7 +274,7 @@ function S = stations(G, o, inp, xcWin)
 
     % valid domain: inlet -> buffer start, in % chord
     ib = colAt(G, bufferFrac(inp));
-    xcLo = min(G.xic(1:ib))*100;  xcHi = max(G.xic(1:ib))*100;
+    xcLo = min(G.pos(1:ib));  xcHi = max(G.pos(1:ib));
     if ~isempty(xcWin)
         xcLo = max(xcLo, xcWin(1));  xcHi = min(xcHi, xcWin(2));
     end
@@ -268,25 +304,30 @@ function S = stations(G, o, inp, xcWin)
 
         for j = 1:numel(idx)
             k = idx(j);
-            c = findNearest(G.xic, xc_v(k)/100);
+            c = findNearest(G.pos, xc_v(k));
             S(j) = mkStation(G, c, xc_v(k), '%.0f', ord_v(k));
         end
     else
         % ---- no experimental data: evenly-spaced grid columns ----
-        cLo  = findNearest(G.xic, xcLo/100);
-        cHi  = findNearest(G.xic, xcHi/100);
+        cLo  = findNearest(G.pos, xcLo);
+        cHi  = findNearest(G.pos, xcHi);
         cols = unique(round(linspace(cLo, cHi, NSTA)));
         for j = 1:numel(cols)
             c = cols(j);
-            S(j) = mkStation(G, c, G.xic(c)*100, '%.1f', []);
+            S(j) = mkStation(G, c, G.pos(c), G.posFmt, []);
         end
     end
 end
 
-% one station record; `label` is the x/c text, `sd0` the S*/delta_0 shown
-% alongside it in the panel title
-function s = mkStation(G, c, xcPct, fmt, korig)
-    s = struct('xcPct', xcPct, 'label', sprintf(fmt, xcPct), ...
+% one station record: `pos` its station coordinate (G.pos units), `label` that
+% as text, `title` the panel title (x/c with S*/delta_0, or S*/delta_0 alone)
+function s = mkStation(G, c, pos, fmt, korig)
+    if G.useXc
+        ttl = sprintf('$x/c = %s\\%%$ \\ \\ $(S^{*}/\\delta_0 = %.0f)$', sprintf(fmt, pos), G.sd0(c));
+    else
+        ttl = sprintf('$S^{*}/\\delta_0 = %.0f$', G.sd0(c));
+    end
+    s = struct('pos', pos, 'label', sprintf(fmt, pos), 'title', ttl, ...
                'sd0', G.sd0(c), 'col', c, 'n', G.wallDist(c), 'korig', korig);
 end
 
@@ -299,7 +340,7 @@ end
 %
 %  Layout: a 2 x ns tiledlayout, top row the mean flow, bottom row the
 %  fundamental w RMS, ONE legend under the whole figure. Wall distance is in
-%  MILLIMETRES and both rows share the same y-limit (yTop, passed in metres),
+%  delta_0 and both rows share the same y-limit (yTop),
 %  so the eye carries vertically from the mean flow to the perturbation it
 %  drives; only the left column keeps its y tick labels.
 %
@@ -314,15 +355,14 @@ end
 %                these separate an amplitude deficit from a mode-shape error
 %                without leaving the figure.
 % ======================================================================
-function fig = plotStations(S, sBF, sPert, o, inp, m, uref, yTopM)
+function fig = plotStations(S, sBF, sPert, o, inp, m, yTop)
 
     ns   = numel(S);
-    yTop = yTopM * 1e3;                              % plot in mm throughout
     cSolver = [0 0 0];  cExp = [0.75 0.08 0.08];  cBase = [0.55 0.55 0.55];
 
     % ---- pass 1: collect every curve, so the shared limits and the
     %      annotations can be built before anything is drawn ----
-    D = collectStations(S, sBF, sPert, o, m, uref, yTop);
+    D = collectStations(S, sBF, sPert, o, m, yTop);
 
     % shared x-limits per row (0 -> max over all stations, padded)
     shareX = shareXLim(inp);
@@ -353,13 +393,11 @@ function fig = plotStations(S, sBF, sPert, o, inp, m, uref, yTopM)
         end
         finishPanel(ax, j, yTop, shareX, xlM);
         if d.hasMFD
-            xlabel(ax, '$w_{\mathrm{B}} + w_{(0,0)} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
+            xlabel(ax, '$(w_{\mathrm{B}} + w_{(0,0)}) / u_\infty$', 'Interpreter', 'latex');
         else
-            xlabel(ax, '$w_{\mathrm{B}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
+            xlabel(ax, '$w_{\mathrm{B}} / u_\infty$', 'Interpreter', 'latex');
         end
-        % single line now: in mm there is no 1e-3 exponent label to collide with
-        title(ax, sprintf('$x/c = %s\\%%$ \\ \\ $(S^{*}/\\delta_0 = %.0f)$', ...
-                          S(j).label, S(j).sd0), 'Interpreter', 'latex', 'FontSize', 11);
+        title(ax, S(j).title, 'Interpreter', 'latex', 'FontSize', 11);
 
         % ---- bottom: fundamental perturbation w RMS ----
         ax = nexttile(t, ns + j); hold(ax, 'on');
@@ -368,16 +406,16 @@ function fig = plotStations(S, sBF, sPert, o, inp, m, uref, yTopM)
             profCurve(ax, d.wRmsExp, d.yRmsExp, cExp, 1.1, MS);
         end
         finishPanel(ax, j, yTop, shareX, xlR);
-        xlabel(ax, '$w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex');
+        xlabel(ax, '$w_{\mathrm{rms}} / u_\infty$', 'Interpreter', 'latex');
         annot(ax, peakText(d), ratioColor(d.ratio));
     end
 
-    ylabel(t, '$\mathrm{Wall\ distance\ [mm]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(t, '$n / \delta_0$', 'Interpreter', 'latex', 'FontSize', 12);
     sharedLegend(t, L);
 end
 
 % ---- one pass over the stations: everything needed to draw and to annotate --
-function D = collectStations(S, sBF, sPert, o, m, uref, yTop)
+function D = collectStations(S, sBF, sPert, o, m, yTop)
     fn = sprintf('w_pert_m_prof_rms_%02d', m-1);
     yn = sprintf('y_prof_rms_%02d', m-1);
     D  = repmat(emptyCurves(yTop), 1, numel(S));
@@ -385,18 +423,18 @@ function D = collectStations(S, sBF, sPert, o, m, uref, yTop)
     for j = 1:numel(S)
         c = S(j).col;  k = S(j).korig;
         d = emptyCurves(yTop);
-        d.y = S(j).n(:) * 1e3;                       % wall distance [mm]
-        [d.wMean, d.wBase, d.hasMFD] = meanW(sBF, sPert, c, uref);
-        wr = abs(squeeze(sPert.w(m,:,c))) / sqrt(2) * uref;
+        d.y = S(j).n(:);                             % wall distance [delta_0]
+        [d.wMean, d.wBase, d.hasMFD] = meanW(sBF, sPert, c);
+        wr = abs(squeeze(sPert.w(m,:,c))) / sqrt(2);
         d.wRms = wr(:);
 
         if ~isempty(k)
-            ye = double(o.y{k});                     % PIV y is already in mm
+            ye = o.y{k};                             % PIV, already in delta_0
             d.yMeanExp = ye(:,1);
             d.wMeanExp = local_rowmean(o.w_m_mean{k});
             if isfield(o, fn) && isfield(o, yn)
-                we = double(o.(fn){k});  d.wRmsExp = we(:);
-                ye = double(o.(yn){k});  d.yRmsExp = ye(:);
+                we = o.(fn){k};  d.wRmsExp = we(:);
+                ye = o.(yn){k};  d.yRmsExp = ye(:);
             end
         end
 
@@ -471,11 +509,11 @@ function lines = peakText(d)
     lines = {};
     if ~isfinite(d.pkN); return; end
     if isfinite(d.pkP)
-        lines = {sprintf('$\\hat{w}_{\\max}:\\ %.2f\\,/\\,%.2f$', d.pkN, d.pkP), ...
+        lines = {sprintf('$\\hat{w}_{\\max}:\\ %.3f\\,/\\,%.3f$', d.pkN, d.pkP), ...
                  sprintf('$N/P = %.2f$', d.ratio), ...
                  sprintf('$y_{\\max}:\\ %.2f\\,/\\,%.2f$', d.ypkN, d.ypkP)};
     else
-        lines = {sprintf('$\\hat{w}_{\\max} = %.2f$', d.pkN), ...
+        lines = {sprintf('$\\hat{w}_{\\max} = %.3f$', d.pkN), ...
                  sprintf('$y_{\\max} = %.2f$', d.ypkN)};
     end
 end
@@ -520,27 +558,26 @@ function saveFig(fig, savedir, fname, m, S)
 end
 
 % ======================================================================
-%  Streamwise evolution: max_y w_rms against x/c
+%  Streamwise evolution: max_n w_rms against x/c
 %
 %  One number per station instead of a profile: the peak of the same w_rms the
 %  profile figures draw, so amplitude growth (and where HNS and PIV part company)
 %  is read off a single curve. HNS is evaluated at EVERY grid column up to the
 %  outflow buffer; PIV only exists at its own stations, so it stays as markers.
 %
-%  Both peaks are taken over the broad figure's wall-normal window (yTopM), which
+%  Both peaks are taken over the broad figure's wall-normal window (yTop), which
 %  keeps free-stream noise from winning the max and guarantees the value plotted
 %  here is the peak of the profile plotted there.
 %
 %  Returns the figure handle and how many PIV stations made it in ([] if there is
 %  no HNS curve to draw).
 % ======================================================================
-function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
+function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, yTop)
     fig = [];  nPIV = 0;
-    yTop = yTopM * 1e3;                              % the peaks are taken in mm
     cSolver = [0 0 0];  cExp = [0.75 0.08 0.08];
 
     ib  = colAt(G, bufferFrac(inp));
-    xcN = G.xic(1:ib) * 100;
+    xcN = G.pos(1:ib);                               % x/c [%], or S*/delta_0
     xcLim = [min(xcN), max(xcN)];
 
     % ---- HNS: total, then one curve per resolved harmonic ----
@@ -548,11 +585,11 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
     pkTot = nan(1, ib);
     pkM   = nan(numel(hrm), ib);
     for c = 1:ib
-        ymm = G.wallDist(c) * 1e3;
-        pkTot(c) = peakIn(hnsTotalRms(sPert, c, uref, hrm), ymm, yTop);
+        yc = G.wallDist(c);
+        pkTot(c) = peakIn(hnsTotalRms(sPert, c, hrm), yc, yTop);
         for i = 1:numel(hrm)
-            wr = abs(squeeze(sPert.w(hrm(i)+1,:,c))) / sqrt(2) * uref;
-            pkM(i,c) = peakIn(wr(:), ymm, yTop);
+            wr = abs(squeeze(sPert.w(hrm(i)+1,:,c))) / sqrt(2);
+            pkM(i,c) = peakIn(wr(:), yc, yTop);
         end
     end
     if ~any(isfinite(pkTot))
@@ -592,7 +629,7 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
     local_style(ax1);  logY(ax1, yl1);
     xlim(ax1, xcLim);
     set(ax1, 'XTickLabel', []);
-    ylabel(ax1, '$\max_y w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax1, '$\max_n w_{\mathrm{rms}} / u_\infty$', 'Interpreter', 'latex', 'FontSize', 12);
     title(ax1, sprintf('\\textrm{Total~}$(%s$\\textrm{, in quadrature)}', modeListTex(hrm)), ...
           'Interpreter', 'latex', 'FontSize', 12);
     legend(ax1, hs, labs, 'Interpreter', 'latex', 'Location', 'northwest', 'FontSize', 11);
@@ -611,8 +648,8 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
     end
     local_style(ax2);  logY(ax2, yl2);
     xlim(ax2, xcLim);
-    xlabel(ax2, '$x/c \ [\%]$', 'Interpreter', 'latex', 'FontSize', 12);
-    ylabel(ax2, '$\max_y w_{\mathrm{rms}} \ \mathrm{[m/s]}$', 'Interpreter', 'latex', 'FontSize', 12);
+    xlabel(ax2, G.posLabel, 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax2, '$\max_n w_{\mathrm{rms}} / u_\infty$', 'Interpreter', 'latex', 'FontSize', 12);
     title(ax2, '\textrm{Per spanwise mode}', 'Interpreter', 'latex', 'FontSize', 12);
 
     % Legend: the two style keys (neutral black) then one entry per mode colour,
@@ -629,7 +666,7 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, uref, yTopM)
     legend(ax2, [kh, hM], [kl, labM], 'Interpreter', 'latex', 'FontSize', 10, ...
            'Orientation', 'horizontal', 'Location', 'southoutside', 'Box', 'off');
 
-    title(t, sprintf('\\textrm{Streamwise evolution~}$(\\max_y$\\textrm{~over~}$y \\leq %.2f$\\textrm{~mm)}', yTop), ...
+    title(t, sprintf('\\textrm{Streamwise evolution~}$(\\max_n$\\textrm{~over~}$n/\\delta_0 \\leq %.1f$\\textrm{)}', yTop), ...
           'Interpreter', 'latex', 'FontSize', 13);
 end
 
@@ -654,15 +691,15 @@ function h = harmonics(o, inp, sPert)
     if isempty(h); h = 1:min(3, hmax); end
 end
 
-% total perturbation RMS profile at one column [m/s]: the modes are orthogonal in
+% total perturbation RMS profile at one column [u_inf]: the modes are orthogonal in
 % z (distinct beta), so their z-RMS values add in quadrature.
 %
 % Summed over the SAME harmonics as the PIV total (hrm), not over every row the
 % solver carries. Both sides are then truncated alike, which is what makes the
 % two totals comparable -- and the (0,0) mean-flow distortion stays out either
 % way, being part of the mean rather than a fluctuation.
-function wr = hnsTotalRms(sPert, c, uref, hrm)
-    W  = abs(squeeze(sPert.w(hrm+1,:,c))) / sqrt(2) * uref;   % numel(hrm) x Ny
+function wr = hnsTotalRms(sPert, c, hrm)
+    W  = abs(squeeze(sPert.w(hrm+1,:,c))) / sqrt(2);          % numel(hrm) x Ny
     if isvector(W); W = W(:).'; end
     wr = sqrt(sum(W.^2, 1, 'omitnan')).';
 end
@@ -678,7 +715,7 @@ function [xc, pk] = pivPeaks(o, inp, h, yTop, xcLim)
     for k = 1:numel(o.xc)
         x = double(o.xc{k}(1));
         if x < xcLim(1) || x > xcLim(2); continue; end
-        p = peakIn(double(o.(fn){k}(:)), double(o.(yn){k}(:)), yTop);   % PIV y is in mm
+        p = peakIn(o.(fn){k}(:), o.(yn){k}(:), yTop);
         if ~isfinite(p); continue; end
         xc(end+1) = x;   %#ok<AGROW>
         pk(end+1) = p;   %#ok<AGROW>
@@ -709,7 +746,7 @@ function [xc, pk] = pivTotal(o, inp, hrm, yTop, xcLim)
             fn = sprintf('w_pert_m_prof_rms_%02d', h);
             yn = sprintf('y_prof_rms_%02d', h);
             if ~isfield(o, fn) || ~isfield(o, yn); continue; end
-            v = double(o.(fn){k}(:));  yv = double(o.(yn){k}(:));
+            v = o.(fn){k}(:);  yv = o.(yn){k}(:);
             if isempty(r)
                 r = v.^2;  y = yv;
             elseif isequal(size(v), size(r))
@@ -722,7 +759,7 @@ function [xc, pk] = pivTotal(o, inp, hrm, yTop, xcLim)
         end
         if isempty(r); continue; end
 
-        p = peakIn(sqrt(r), y, yTop);      % PIV y is in mm
+        p = peakIn(sqrt(r), y, yTop);
         if ~isfinite(p); continue; end
         xc(end+1) = x;   %#ok<AGROW>
         pk(end+1) = p;   %#ok<AGROW>
@@ -837,7 +874,7 @@ end
 % ======================================================================
 function S = emptyStations()
     % same field order as mkStation
-    S = struct('xcPct', {}, 'label', {}, 'sd0', {}, 'col', {}, 'n', {}, 'korig', {});
+    S = struct('pos', {}, 'label', {}, 'title', {}, 'sd0', {}, 'col', {}, 'n', {}, 'korig', {});
 end
 
 % column index at a given fraction of the streamwise extent
@@ -845,11 +882,11 @@ function ib = colAt(G, frac)
     ib = min(G.Nx, max(2, round(frac * G.Nx)));
 end
 
-% Shared y-limit (BOTH rows, BOTH figures), as a wall distance [m].
+% Shared y-limit (BOTH rows, BOTH figures), as a wall distance [delta_0].
 %
 % Sized on the PERTURBATION extent: 1.5 x the highest point at which w_rms is
 % still 5% of its station peak, maxed over the plotted stations and capped by
-% the grid height. inp.valYTop [mm] overrides it outright.
+% the grid height. inp.valYTop [delta_0] overrides it outright.
 %
 % Deliberately NOT a delta_99 criterion. The obvious one (deepest row still at
 % 99% of the column's max u) is wrong for this geometry: near the leading edge
@@ -859,15 +896,15 @@ end
 % plateaus by 1.3 mm, which is what used to inflate the broad figure to 6 mm.
 % The perturbation extent needs no edge detection and is what both rows are
 % actually about.
-function yTop = autoYTop(S, sPert, m, uref, inp)
+function yTop = autoYTop(S, sPert, m, inp)
     if isfield(inp, 'valYTop') && ~isempty(inp.valYTop)
-        yTop = double(inp.valYTop) * 1e-3;  return;       % inputs.jl gives mm
+        yTop = double(inp.valYTop);  return;              % inputs.jl gives delta_0
     end
     ext = 0;  nMax = 0;
     for j = 1:numel(S)
         n = S(j).n;
         nMax = max(nMax, max(n));
-        wr = abs(squeeze(sPert.w(m,:,S(j).col))) / sqrt(2) * uref;
+        wr = abs(squeeze(sPert.w(m,:,S(j).col))) / sqrt(2);
         wr = wr(:);
         pk = max(wr);
         if ~isfinite(pk) || pk <= 0; continue; end
@@ -921,10 +958,10 @@ end
 %  (0,0) first. We still verify it via beta = omega = 0 when those vectors are
 %  present, and fall back to the base flow alone if they say otherwise.
 %
-%  Returns wTot (Ny x 1, [m/s]), wBase (same, base flow alone) and hasMFD.
+%  Returns wTot (Ny x 1, [u_inf]), wBase (same, base flow alone) and hasMFD.
 % ======================================================================
-function [wTot, wBase, hasMFD] = meanW(sBF, sPert, c, uref)
-    wBase  = sBF.w(:,c) * uref;
+function [wTot, wBase, hasMFD] = meanW(sBF, sPert, c)
+    wBase  = sBF.w(:,c);
     wTot   = wBase;
     hasMFD = false;
     if isempty(sPert) || ~isfield(sPert,'w') || size(sPert.w,1) < 1; return; end
@@ -950,7 +987,7 @@ function [wTot, wBase, hasMFD] = meanW(sBF, sPert, c, uref)
                   'part (|Im|/|Re| = %.2g); using real() — check the mode ordering.'], ...
                  aIm/max(aRe, eps));
     end
-    wTot   = wBase + real(wm) * uref;
+    wTot   = wBase + real(wm);
     hasMFD = true;
 end
 

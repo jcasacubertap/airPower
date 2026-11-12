@@ -15,7 +15,7 @@ const inp = (
         enabled = true,            # true to activate the bump
         mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
-        A       = 2.0E-03,           # [m] height (positive=protrusion, negative=depression)
+        A       = 1.0E-03,           # [m] height (positive=protrusion, negative=depression)
 
         # Sigmoidal shape parameters
         p       = 10,              # front steepness exponent (≥3 for C2)
@@ -32,8 +32,8 @@ const inp = (
     # ======================================================================
     DFP = (
         # Domain geometry 
-        domainLength = 0.325,     #0.650, # [m]
-        domainHeight = 0.040092,  #0.020046, # [m]
+        domainLength = 0.325,    #0.650, # [m]
+        domainHeight = 0.04,     #0.020046, # [m]
 
         # Inflow parameters
         Uinf   = 12.417927662146404,                 # chordwise velocity [m/s]
@@ -67,10 +67,10 @@ const inp = (
             #    geometry (no solve). Any Rek/AoverDstar target triggers the IBL
             #    inversion. A resolved A overrides the shared wallModulation.A.
             #    (ESN/xCenter only for now; sigmoidal scaling is future work.)
-            A          = nothing,        # [m]  bump height       (number, or nothing → solve)
-            xCenter    = nothing,        # [m]  ESN bump center   (number, or nothing → solve)
-            Rek        = 3000,           # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
-            AoverDstar = 4.9898,         # [-]  A / δ*(xCenter)              (target, or nothing)
+            A          = 0.001,        # [m]  bump height       (number, or nothing → solve)
+            xCenter    = 0.08833,        # [m]  ESN bump center   (number, or nothing → solve)
+            Rek        = nothing,           # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
+            AoverDstar = nothing,         # [-]  A / δ*(xCenter)              (target, or nothing)
 
             # Sigmoidal extents (used only by the sigmoidal shape; not part of
             # the scaling spec)
@@ -213,7 +213,7 @@ const inp = (
         ),
         valPIV  = true,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
-        Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
+        Case    = 2,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
 
         # Spectral integral-boundary-layer (IBL) validation solver — shared by
         # the DFP (profile overlay) and TTCP (δ99/δ* comparison). When valBL is
@@ -237,23 +237,25 @@ const inp = (
     # ======================================================================
     PostProcessing = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
-        loadMode       = "loadBF",             # 'loadBF' | 'loadFields'
+        loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
         caseType       = "TTCP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "m3j_clean_output.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        fieldsFile     = "StabRes_cfi_hump_h1mm_l7d5mm.mat",      # (loadFields) from `instAbility DeHNSSo run`
         modeIdx        = Int[2,2],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all.
                                              #   Repeated entries are de-duplicated on load (importData), so a mode is
                                              #   never drawn twice or listed twice in a legend.
         plotUProfiles  = false,              # true: also draw profiles_u.png (non-dimensional u base flow + |u~|).
                                              #   Off for now; the w-vs-PIV validation figures are unaffected.
-        validation     = true,                # true: add the dimensional w-profile figures vs PIV (Gen/Case from the VAL block).
-                                              #   profiles_w_validation.png       — zoom: stations ARE PIV stations, inside valXcZoom
-                                              #   profiles_w_validation_broad.png — broad: stations across the whole numerical
-                                              #     domain, with the PIV overlay wherever a station is close to a PIV one
+        validation     = false,                # w-profile figures are always drawn; this picks how:
+                                              #   false: stations in S*/delta_0, DeHNSSo alone (profiles_w_broad.png, amplitude_w.png)
+                                              #   true : stations in x/c vs PIV (Gen/Case from the VAL block), needs the airfoil:
+                                              #     profiles_w_validation.png       — zoom: stations ARE PIV stations, inside valXcZoom
+                                              #     profiles_w_validation_broad.png — broad: stations across the whole numerical
+                                              #       domain, with the PIV overlay wherever a station is close to a PIV one
         valXcZoom      = [5.0, 25.0],        # zoom figure: PIV-station x/c window [%] ([] -> every station in the domain)
         valShareX      = true,               # w-validation figures: one x-limit per ROW across all stations, so the
                                              #   streamwise growth is readable. false -> per-panel autoscaling, which
                                              #   resolves each station's shape but makes every panel look alike.
-        valYTop        = [],                 # w-validation figures: wall-distance limit [mm], shared by both rows.
+        valYTop        = [],                 # w-validation figures: wall-distance limit [delta_0], shared by both rows.
                                              #   [] -> auto (1.5 x the perturbation extent over the plotted stations)
         # Plot window — ONE definition, shared by every PostProcessing figure
         # (base flow, perturbation shapes, profiles, Reynolds–Orr). See
@@ -267,7 +269,7 @@ const inp = (
             # runs non-dimensionally, so loadFields stays in delta_0, while loadBF carries
             # the dimensional OpenFOAM grid. One key each, units stated, no conversion
             # between them — plotWindow picks the right one from loadMode.
-            yMaxFields = 20.0,     # loadFields: wall-normal max in y/delta_0 ; [] -> yWallFrac
+            yMaxFields = 20.0,     # loadFields: wall-normal max in n/delta_0 ; [] -> yWallFrac
             yMaxBF     = 0.005,    # loadBF    : wall-normal max in METRES     ; [] -> yWallFrac
             yWallFrac  = 0.30,     # near-wall fraction of the domain height used when the above is []
         ),

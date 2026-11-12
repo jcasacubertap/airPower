@@ -14,32 +14,67 @@ function [sBF, sPert, inp] = importData(inp)
 %   sBF.u, sBF.v, sBF.w    velocity components
 %   sBF.p                  pressure          (loadBF; absent in loadFields)
 %   sBF.omz                z-vorticity       (loadBF, if present in source)
-%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients — loadFields ONLY (read from the
-%                          stability grid). loadBF provides none, for either mesh:
-%                          both are multi-block structured and body-fitted, where a
-%                          row step changes x and y together, so a Cartesian
-%                          differentiateField call would be wrong. See
-%                          assembleBodyFitted for what correct metrics would need.
+%   sBF.ux,uy,vx,vy,wx,wy  base-flow gradients d/dX, d/dY in the frame of
+%                          geom.X/Y, from BOTH loaders:
+%                          loadFields -> read from the file;
+%                          loadBF     -> computed here by differentiateField
+%                                        (4th-order FD along the grid lines +
+%                                        metric chain rule).
 %
-% Coordinates come in one of two shapes, because the two sources hold the base
-% flow on different kinds of grid:
-%   sBF.x, sBF.y   rectilinear stability grid (loadFields), i.e. Cartesian x and y
-%   sBF.s, sBF.n   wall-fitted pair on the body-fitted PreProcessing meshes
-%                  (loadBF, both DFP and TTCP):
-%                  s = arc length along the wall, 0 at the first exported station
-%                  (the S* of the figures); n = wall-normal distance. Named (s,n)
-%                  rather than (s,y) so that y NEVER means anything but Cartesian
-%                  y, whichever grid is loaded.
+% Coordinates, the same layout from BOTH loaders:
+%   sBF.s, sBF.n   wall-fitted pair, what every figure plots against:
+%                  s = arc length along the wall from the FIRST WALL POINT OF THE
+%                  BASE-FLOW SOURCE (the S* of the figures). loadBF: the first
+%                  exported station. loadFields: the first wall point of the base
+%                  flow DeHNSSo was fed, so a run on an exported OpenFOAM base flow
+%                  shares loadBF's origin, and a trimmed inflow starts at s > 0.
+%                  n = distance up each grid column from the wall.
+%                  (s,n) LABEL GRID POINTS: a point is "on the column whose wall
+%                  point is at s, a length n up that column". Where a mesh column
+%                  leans off the wall normal, n is the length along the column
+%                  rather than the perpendicular distance, and the point sits
+%                  slightly up/downstream of station s (TTCP: <= 4.3 deg tilt,
+%                  over the bump). DeHNSSo resamples along the same columns, so
+%                  both loaders share this.
+%                  Units are each loader's own: m (loadBF), delta_0 (loadFields).
+%                  Named (s,n) rather than (s,y) so that y NEVER means anything
+%                  but Cartesian y, whichever grid is loaded.
 %
-% sBF.geom (loadBF on the body-fitted mesh) holds the physical Cartesian cell
-% centres X, Y [m], co-registered with everything else. They are kept out of the
-% top level because nothing plots against them — the figures all use (s,n) — and
-% four coordinate matrices side by side only invites plotting the flow against
-% the wrong pair. They are kept AT ALL because (X,Y) -> (s,n) is one-way: it
+%   sBF.geom.X, sBF.geom.Y   physical Cartesian coordinates of the same points,
+%                  in the loader's units (m for loadBF, delta_0 for loadFields).
+%                  They are in whatever Cartesian frame the source data was
+%                  written in; importData does not label or transform it.
+%
+% X, Y are kept out of the top level because nothing plots against them — the
+% figures all use (s,n) — and four coordinate matrices side by side only invites
+% plotting the flow against the wrong pair. They are kept AT ALL because (X,Y) -> (s,n) is one-way: it
 % discards where the wall is and how it is oriented, so the geometry cannot be
 % rebuilt from (s,n). It is what the wall shape (including any modulation) lives
 % in, what maps a station to x/c, and what the metric terms for curvilinear
 % gradients are built from.
+%
+% Boundary-layer edge quantities (loadBF only, when the PreProcessing case has
+% run blMetrics.jl): sBF.BL, one value per column (1 x Nx), SI:
+%   .Ue                edge velocity [m/s], wall-tangential, by the method chosen
+%                      in the case's constant/inputParam (blMetrics.method)
+%   .d99, .dstar, .theta    delta_99 (the edge location, which is also where the
+%                      delta* and theta integrals stop), delta*, theta [m]
+%   .We, .d99_w, .dstar_w, .theta_w   the same from the spanwise profile, whose
+%                      edge velocity is the free-stream W_inf
+%   .method            the blMetrics.method used
+% Read from postProcessing/BLQuantities.csv and matched to the loadBF columns by
+% wall position. NaN where blMetrics found no edge (e.g. delta_99 not reached).
+%
+% Units: every sBF field is in its source's own units, and sBF says which:
+%   sBF.units   'SI'     (loadBF: m, m/s, kinematic p in m^2/s^2)
+%               'nondim' (loadFields: lengths in delta_0 = lref, velocities in
+%                         u_inf = Uref)
+%   sBF.ref     the reference scales the source carries, empty when it has none:
+%               loadBF     -> struct() (the midPlane export holds no scales)
+%               loadFields -> .lref [m], .Uref [m/s], .Re, as stored in StabGrid
+%   SI = nondim value .* sBF.ref.lref (lengths) or .* sBF.ref.Uref (velocities).
+%   importData never converts: a dataset is returned as it was written, and its
+%   scales come from the dataset itself, nothing external.
 %
 % sPert (loadFields only) carries all perturbation modes:
 %   sPert.u,v,w,p          (Nmode x Ny x Nx) complex, PHYSICAL PEAK fields
@@ -227,6 +262,64 @@ function [sBF, inp] = importFromPreProc(inp)
     end
 
     sBF = assembleBodyFitted(T, isWall);
+    sBF.units = 'SI';
+    sBF.ref   = struct();     % the midPlane export carries no reference scales
+
+    % Cartesian base-flow gradients (differentiateField), so both loaders return
+    % the same fields
+    [gx, gy] = differentiateField(cat(3, sBF.u, sBF.v, sBF.w), sBF);
+    sBF.ux = gx(:,:,1);  sBF.uy = gy(:,:,1);
+    sBF.vx = gx(:,:,2);  sBF.vy = gy(:,:,2);
+    sBF.wx = gx(:,:,3);  sBF.wy = gy(:,:,3);
+
+    % boundary-layer edge quantities from the same case, if blMetrics has run
+    BL = readBLQuantities(caseDir, sBF);
+    if ~isempty(BL); sBF.BL = BL; end
+end
+
+% --- loadBF: postProcessing/BLQuantities.csv (blMetrics.jl) onto the columns ---
+% The CSV holds one row per wall face, the same faces loadBF's wall row is built
+% from, so each row is matched to its column by the wall x (the CSV's s is
+% measured from the airfoil LE, not from loadBF's origin, so it is not used).
+% Returns [] (with a note) when the file is absent or does not match the grid.
+function BL = readBLQuantities(caseDir, sBF)
+    BL = [];
+    f = fullfile(caseDir, 'postProcessing', 'BLQuantities.csv');
+    if ~isfile(f)
+        fprintf('importData: no BLQuantities.csv in %s -> no sBF.BL\n', fileparts(f));
+        return;
+    end
+    T  = readtable(f);
+    [~, rw] = min(sBF.n(:, 1));               % wall row (n = 0), whichever way up
+    Xw = sBF.geom.X(rw, :);
+    % nearest CSV row for each column, accepted only well inside one spacing
+    [d, k] = min(abs(T.x(:) - Xw), [], 1);
+    tol = 0.25 * min(abs(diff(Xw)));
+    if height(T) ~= numel(Xw) || any(d > tol) || numel(unique(k)) ~= numel(k)
+        warning('importData:BLmismatch', ...
+                ['BLQuantities.csv (%d rows) does not match the %d wall stations ' ...
+                 '(worst x offset %.3g m) -> no sBF.BL. Re-run blMetrics on this case.'], ...
+                height(T), numel(Xw), max(d));
+        return;
+    end
+    map = {'Ue','Ue'; 'd99','d99'; 'dstar','dstar'; 'Theta','theta'; ...
+           'We','We'; 'd99_w','d99_w'; 'dstar_w','dstar_w'; 'Theta_w','theta_w'};
+    for i = 1:size(map, 1)
+        if ismember(map{i,1}, T.Properties.VariableNames)
+            BL.(map{i,2}) = T.(map{i,1})(k).';
+        end
+    end
+    BL.method = blMethod(caseDir);
+    fprintf('importData: BL edge quantities from BLQuantities.csv (method %s)\n', BL.method);
+end
+
+% blMetrics.method from the case's constant/inputParam ('' if not found)
+function m = blMethod(caseDir)
+    m = '';
+    f = fullfile(caseDir, 'constant', 'inputParam');
+    if ~isfile(f); return; end
+    tok = regexp(fileread(f), 'blMetrics\s*\{[^}]*?\<method\s+(\w+)\s*;', 'tokens', 'once');
+    if ~isempty(tok); m = tok{1}; end
 end
 
 % --- DFP & TTCP: rebuild the multi-block body-fitted grid from the mesh ordering ---
@@ -239,11 +332,8 @@ end
 %                 kept aside because no figure plots against them
 %   .u .v .w .p .omz   the exported fields
 %
-% Base-flow gradients are deliberately NOT computed here. On a body-fitted grid
-% a row step changes both x and y, so differentiateField(u, X, 2) returns
-% u_xi / x_xi rather than du/dx; correct metric terms are a separate change.
-% Nothing consumes loadBF gradients today (loadBF returns sPert = [], and run.m
-% refuses reynoldsOrrProdTerms without perturbation data).
+% Base-flow gradients are added by importFromPreProc (differentiateField), once
+% the grid and its coordinates are complete.
 function sBF = assembleBodyFitted(T, isWall)
 
     Tw = T(isWall,  :);      % wall-face rows (u=v=w=0), one per station
@@ -506,7 +596,7 @@ function [sBF, sPert, inp] = importFromFields(inp)
     % --- base flow on the stability grid (Ny x Nx) ---
     % Coordinates: prefer the PHYSICAL Cartesian arrays G.X/G.Y. They carry the
     % actual wall geometry (e.g. a hump/roughness: G.Y rises with the bump) and
-    % use the inlet-origin frame, so the base flow matches the PreProcessing view.
+    % are in the frame of the base flow DeHNSSo was fed.
     % The 1-D G.x/G.y are wall-fitted (x from the LE; eta = flat wall at 0), which
     % would flatten any wall feature. Fall back to meshgrid(G.x,G.y) for older
     % grids without X/Y (flat wall, where the two representations coincide).
@@ -524,8 +614,33 @@ function [sBF, sPert, inp] = importFromFields(inp)
               Ny, Nx, size(Xg,1), size(Xg,2));
     end
 
-    sBF.x = Xg;
-    sBF.y = Yg;
+    % Cartesian coordinates under geom, as loadBF stores them (see the header).
+    sBF.geom.X = Xg;
+    sBF.geom.Y = Yg;
+
+    % Wall-fitted pair, same meaning as loadBF's (see the header), in delta_0.
+    % s: gridgen measures xi along the wall from the FIRST WALL POINT OF THE BASE
+    % FLOW IT WAS FED, and keeps that origin through any inflow trim; it then adds
+    % Re (DeHNSSo's ILST convention). Removing Re restores the source origin, so a
+    % DeHNSSo run on an exported OpenFOAM base flow shares loadBF's s = 0, and its
+    % inflow sits at its true position (s > 0 after a trim) rather than at 0.
+    % n: eta is arc length up each grid column from the wall, as loadBF's n.
+    % Cartesian grids (flat plate, no G.X) carry no Re offset: x is the physical
+    % x of the source frame and is taken as is.
+    if isfield(G, 'X') && isfield(G, 'Re')
+        s1 = G.x(:).' - G.Re;
+    else
+        s1 = G.x(:).';
+    end
+    if s1(1) < -1e-9 * max(abs(s1))
+        warning('importData:negativeS', ...
+                ['StabGrid.x - Re starts at %g < 0: this grid does not follow the ' ...
+                 'xi = arc length + Re convention, so s is not anchored to the ' ...
+                 'base-flow source.'], s1(1));
+    end
+    sBF.s = repmat(s1, Ny, 1);
+    sBF.n = repmat(G.y(:), 1, Nx);
+
     sBF.u = G.U;
     sBF.v = G.V;
     sBF.w = G.W;
@@ -558,9 +673,13 @@ function [sBF, sPert, inp] = importFromFields(inp)
     if isfield(R, 'betavec'),  sPert.beta  = R.betavec;  end
     if isfield(R, 'alpha'),    sPert.alpha = R.alpha;    end
     % reference scales (for normalizing plot axes): u_inf, length scale, Re
-    if isfield(G, 'Uref'),     sPert.uref  = G.Uref;     end
-    if isfield(G, 'lref'),     sPert.lref  = G.lref;     end
-    if isfield(G, 'Re'),       sPert.Re    = G.Re;       end
+
+    % units and the reference scales the file carries (see the header)
+    sBF.units = 'nondim';
+    sBF.ref   = struct();
+    for f = {'lref', 'Uref', 'Re'}
+        if isfield(G, f{1}); sBF.ref.(f{1}) = G.(f{1}); end
+    end
 
     fprintf('importData: loaded %s — base flow %dx%d, %d perturbation mode(s)\n', ...
             inp.fieldsFile, Ny, Nx, size(sPert.u, 1));

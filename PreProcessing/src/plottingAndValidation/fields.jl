@@ -658,8 +658,8 @@ end
 
 First derivative of `f` on a (possibly non-uniform) grid `y`, both sorted by y.
 Interior points use the 3-point non-uniform central stencil (2nd order); the
-ends fall back to one-sided differences. Mirrors the DFP post-processor's
-`diffOrder2NonUniform.m` so Julia and MATLAB agree on wall-normal derivatives.
+ends fall back to one-sided differences. The interior stencil is the one
+PostProcessing's `deriv1Uneven.m` uses at order 2.
 """
 function _ddy_nonuniform(y::Vector{Float64}, f::Vector{Float64})
     n = length(y)

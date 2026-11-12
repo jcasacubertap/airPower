@@ -10,10 +10,12 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
 % [] -> all). Stations are the inlet, 1/2, 3/4 and the buffer start (fractions
 % of the streamwise extent). The y-axis is a near-wall window.
 %
-% When inp.validation is true, two further DIMENSIONAL w-profile figures comparing
-% against the PIV Gen/Case data are added (see plotProfilesValidation): a zoom on
-% the PIV stations inside inp.valXcZoom, and a broad view spanning the numerical
-% domain with the experimental overlay wherever a PIV station is close enough.
+% w-profiles are ALWAYS drawn (see plotProfilesValidation): a broad view of
+% w_B + w_(0,0) and w_rms at stations across the domain, plus their peak against
+% the streamwise station. inp.validation only decides how:
+%   true   stations in x/c, with the PIV Gen/Case overlay, plus a zoom on the
+%          PIV stations inside inp.valXcZoom (needs the airfoil geometry);
+%   false  stations in S*/delta_0, DeHNSSo alone -- nothing airfoil-related.
 %
 % Save behaviour: savedir non-empty -> PNGs written there (terminal/dispatcher);
 % empty/omitted -> figures left open for interactive inspection (direct MATLAB).
@@ -25,12 +27,9 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
         figs(end+1) = uFigure(sBF, sPert, inp, savedir);
     end
 
-    % dimensional w-profile comparison vs PIV (only when validation is on).
-    % Returns up to two figures: the PIV-station zoom and the broad domain view.
-    if isfield(inp, 'validation') && inp.validation
-        fw = plotProfilesValidation(sBF, sPert, inp, savedir);
-        if ~isempty(fw); figs = [figs, fw]; end
-    end
+    % w-profiles; against PIV in x/c only when inp.validation is on
+    fw = plotProfilesValidation(sBF, sPert, inp, savedir);
+    if ~isempty(fw); figs = [figs, fw]; end
 end
 
 % whether to draw the non-dimensional u-profile figure (inp.plotUProfiles).
@@ -77,7 +76,7 @@ function f = uFigure(sBF, sPert, inp, savedir)
         plot(sBF.u(:, c), yc, '-', 'LineWidth', 1.5, 'Color', [0 0 0]);
         set(gca, 'TickLabelInterpreter', 'latex'); box on; grid on;
         xlabel('$u_{\mathrm{B}} / u_\infty$', 'Interpreter', 'latex');
-        if j == 1; ylabel('$y / \delta_0$', 'Interpreter', 'latex'); end
+        if j == 1; ylabel('$n / \delta_0$', 'Interpreter', 'latex'); end
         title(sprintf('$S^{*}/\\delta_0 = %.0f$', xs(j)), 'Interpreter', 'latex');
         ylim(yl);
 
@@ -89,7 +88,7 @@ function f = uFigure(sBF, sPert, inp, savedir)
         end
         set(gca, 'TickLabelInterpreter', 'latex'); box on; grid on;
         xlabel('$|\tilde{u}| / u_\infty$', 'Interpreter', 'latex');
-        if j == 1; ylabel('$y / \delta_0$', 'Interpreter', 'latex'); end
+        if j == 1; ylabel('$n / \delta_0$', 'Interpreter', 'latex'); end
         ylim(yl);
         if j == ns
             legend(arrayfun(@(m) sprintf('$(0,%d)$', m-1), modes, 'UniformOutput', false), ...
