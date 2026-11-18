@@ -18,7 +18,7 @@
 #
 
 const ROOT = @__DIR__
-include(joinpath(ROOT, "inputs.jl"))   # `inp` — the single source of truth
+include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "loadInputs.jl"))   # `inp` = inputs.jl + settings.jl
 
 function usage()
     println("""

@@ -39,7 +39,7 @@ function find_ancestor_file(start::String, name::String)
     end
 end
 
-include(find_ancestor_file(@__DIR__, "inputs.jl"))
+include(joinpath(dirname(find_ancestor_file(@__DIR__, "inputs.jl")), "PreProcessing", "src", "auxiliary", "loadInputs.jl"))
 
 # Auto-detect latest converged time directory in TunnelCase
 const TUNNEL_TIME = let

@@ -1,54 +1,51 @@
 #
 # airPower — central inputs
 #
-# All major simulation parameters are defined here.
+# The parameters you set per case or per run. Entries set once and rarely
+# touched (meshing details, export options, solver/plot fine-tuning) live in
+# settings.jl, with the same block layout. The two are merged into one `inp`
+# (PreProcessing/src/auxiliary/loadInputs.jl); a key lives in exactly one file.
 # Access: inp.<CaseName>.<variable>
 #
 
-const inp = (
+const inputs = (
 
     # ======================================================================
     # wallModulation — shared bump SHAPE (independent of placement coord)
     # Per-case positions live in inp.DFP.wallModulation and inp.TTCP.airfoilLE.wallModulation
     # ======================================================================
     wallModulation = (
-        enabled = true,            # true to activate the bump
-        mode    = :single,         # :single (parameters below) or :multiple (read from file, future)
+        enabled = false,            # true to activate the bump
         shape   = :esn,            # :sigmoidal or :esn (epsilon-skewed normal)
-        A       = 1.0E-03,           # [m] height (positive=protrusion, negative=depression)
-
-        # Sigmoidal shape parameters
-        p       = 10,              # front steepness exponent (≥3 for C2)
-        q       = 3,               # back steepness exponent (≥3 for C2)
+        A       = 1E-03,           # [m] height (positive=protrusion, negative=depression)
 
         # ESN shape parameters
         epsilon = 0.0,             # skewness (-1 to 1)
         R       = 50,              # base-to-height ratio [-]; R*A is the physical base width [m]
-        yTol    = 1e-5,            # [m] tail truncation tolerance
     ),
 
     # ======================================================================
     # DFP — DirectFlatPlateModule
     # ======================================================================
     DFP = (
-        # Domain geometry 
-        domainLength = 0.325,    #0.650, # [m]
-        domainHeight = 0.04,     #0.020046, # [m]
+        # Domain geometry
+        domainLength = 0.398763,    #0.650, # [m]
+        domainHeight = 0.020046,     #0.020046, # [m]
 
         # Inflow parameters
-        Uinf   = 12.417927662146404,                 # chordwise velocity [m/s]
-        Winf   = 20.59,                              # spanwise velocity [m/s]
-        xInlet = 0.046694057793992,                  # inlet position (distance from virtual LE) [m]
+        Uinf   = 15.10,                 # chordwise velocity [m/s]
+        Winf   = 18.7379374199,                              # spanwise velocity [m/s]
+        xInlet = 0.04684993006,                  # inlet position (distance from virtual LE) [m]
 
         # Top-boundary pressure polynomial (Casacuberta et al, 2022)
-        pa4 = 0.004709401639645,
-        pa3 = 0.059408065736933,
-        pa2 = 0.245222700832888,
-        pa1 = 0.657504955493668,
-        pa0 = 2.006271563747756,
+        pa4 = 0.002343802682877,
+        pa3 = 0.037696164789990,
+        pa2 = 0.175152760791389,
+        pa1 = 0.530290605857447,
+        pa0 = 1.857425373851459,
 
         # Fluid properties
-        freeStreamViscosity = 1.456610719354608e-5,   # [m^2/s]
+        freeStreamViscosity = 1.472e-5,   # [m^2/s]
 
         # Grid resolution (multipliers on base cell counts)
         gridXfactor = 2,   # streamwise: base (1) is 616 cells (144+24+48+24+280+96)
@@ -71,17 +68,7 @@ const inp = (
             xCenter    = 0.08833,        # [m]  ESN bump center   (number, or nothing → solve)
             Rek        = nothing,           # [-]  roughness Re = u_b(y=A)·A/ν  (target, or nothing)
             AoverDstar = nothing,         # [-]  A / δ*(xCenter)              (target, or nothing)
-
-            # Sigmoidal extents (used only by the sigmoidal shape; not part of
-            # the scaling spec)
-            xStart  = 0.155,           # [m] start of bump
-            xPeak   = 0.157,           # [m] peak location
-            xEnd    = 0.165,           # [m] end of bump
         ),
-
-        # Output settings
-        outputFormat = "csv",           # csv | binary
-        wallExtrapolation = true,       # add wall point (u=v=w=0, p extrapolated) to output
     ),
 
     # ======================================================================
@@ -91,37 +78,19 @@ const inp = (
 
         # ── Shared flow/physics parameters ──────────────────────────────
         flow = (
-            freeStreamVelocityStreamwise  = 17.570475447234216,  # [m/s]
-            freeStreamVelocitySpanwise    = 20.59,  # [m/s]
-            freeStreamViscosity = 1.456610719354608e-5,          # [m^2/s]
+            freeStreamVelocityStreamwise  = 18.738329701443508,  # [m/s]
+            freeStreamVelocitySpanwise    = 18.738329701443508,  # [m/s]
+            freeStreamViscosity = 1.471748410882160e-05,          # [m^2/s]
         ),
 
         # ── TunnelCase-specific ─────────────────────────────────────────
         tunnel = (
-            # Geometry
-            tunnelInletHalfHeight  = 0.900,   # [m] (tunnel inlet half height, symmetry applied)
-            tunnelOutletHalfHeight = 0.900,   # [m] (tunnel outlet half height, symmetry applied)
-            tunnelLength           = 7.800,   # [m]
-
             # Airfoil geometry
             airfoilFile = "M3J.dat",  # file in io/airfoilGeometryData/
             chord       = 0.900,    # [m]
-            alphaDeg    = -3.017,   # [deg]
+            alphaDeg    = -2.995,   # [deg]
             xCenter     = 0.0,      # [m]
             yCenter     = 0.0,      # [m]
-
-            # Grid resolution
-            Nx = 800,
-            Ny = 240,
-
-            # Turbulence
-            turbulenceIntensity = 0.0003, # [-] (turbulenceIntensity = 0.0003 -> I = 0.03 %)
-            turbLengthScale     = 0.009,  # [m]
-
-            # BSpline control points (upper-wall curvature, symmetry applied)
-            xcp1 = -1.950, ycp1 = 0.900,  # [m]
-            xcp2 = 0.0,    ycp2 = 0.900,  # [m]
-            xcp3 = 1.950,  ycp3 = 0.900,  # [m]
         ),
 
         # ── AirfoilLECase-specific ──────────────────────────────────────
@@ -131,67 +100,15 @@ const inp = (
             xiSuctionOutlet  = 0.50,   # x/c at the upper (suction-side) domain outlet
             xiPressureOutlet = 0.08,   # x/c at the lower (pressure-side) domain outlet
 
-            # Wall-normal band heights
-            hBL  = 0.280,   # [m] height of boundary-layer block band (wall-normal)
-            hFar = 0.280,   # [m] height of far-field block band (beyond BL)
-
-            # Block segmentation along C-path
-            nSegSuction  = 6,      # blocks from suction outlet to xiArch (upper side)
-            nSegArchUp   = 2,      # blocks from xiArch to LE (upper side)
-            nSegArchLo   = 2,      # blocks from LE to xiArch (lower side)
-            nSegPressure = 2,      # blocks from xiArch to pressure outlet (lower side)
-            cosineArch   = true,   # cosine clustering of stations near the LE
-
             # Grid resolution
             NxTotal  = 800,
             NyBL     = 400,
-            gradBL   = 200.0,  # BL wall-normal expansion ratio (cell size grows toward outer edge)
-            gradArch = 18.0,   # arch streamwise grading (clusters cells toward the LE)
-
-            # Export / post-processing
-            outputFormat = "csv",       # csv | binary
-            exportMode   = "partial",   # full | partial
-            xiInlet      = 0.02,        # chord fraction for inlet boundary
-            xiOutlet     = 0.50,        # chord fraction for outlet boundary
-            exportHeight = 0.020,       # wall-normal from surface [m]
-            wallExtrapolation = true,   # add wall point (u=v=w=0, p extrapolated) to output
-
-            # Aerodynamic forces — integrate static pressure and wall shear
-            # stress over a wall arclength range defined by chord fractions
-            # [xiStart, xiEnd]. Consumed by
-            # PreProcessing/src/source/aeroForces.jl.
-            aeroForces = (
-                xiStart = 0.05,
-                xiEnd   = 0.30,
-            ),
-
-            # Boundary-layer integral metrics (consumed by
-            # PreProcessing/src/source/blMetrics.jl)
-            blMetrics = (
-                # method — one of:
-                #   "vorticityIntegralTrapezoidal"  trapezoidal sum between cell centres
-                #   "vorticityIntegralMidpoint"     FV midpoint rule (cell extents, wall slice included)
-                #   "maxProfile"                    max(u_tan) in the column
-                #   "fixedHeight"                   u_tan at the topmost cell (≈ exportHeight)
-                #   "pressureBernoulli"             Bernoulli with p_e = p_wall (Prandtl)
-                method = "vorticityIntegralMidpoint",
-            ),
-
-            # Suppress mapped-pressure noise in the BL on suction/pressure outlets:
-            # within `factor` × Blasius δ from the wall, the prescribed p is set
-            # constant equal to the value at the first face beyond that band.
-            clampOutletPressureBL       = false,
-            clampOutletPressureBLFactor = 2.0,
 
             # Wall modulation position on the airfoil upper surface (chord fraction).
             # Shape parameters (A, R, shape, etc.) live in the top-level inp.wallModulation.
             wallModulation = (
                 # ESN center
                 xiCenter = 0.15,       # x/c on chord; converted to arc-length s at evaluation
-                # Sigmoidal extents
-                xiStart  = 0.13,       # x/c
-                xiPeak   = 0.15,       # x/c
-                xiEnd    = 0.20,       # x/c
             ),
         ),
 
@@ -203,29 +120,9 @@ const inp = (
     # VAL — Validation / internal preprocessing (not OpenFOAM case inputs)
     # ======================================================================
     VAL = (
-        externalToScaling = (
-            flowDataFile = "M3J_Case_Q_25_AOA_3.017_Re_2171263.mat",  # in io/airfoilFlowData/
-            percentCrop  = 5.0,           # start cropping at this % of chord
-            Nfit         = 4,             # polynomial order
-            fitLaw       = :logarithmic,  # :monomial or :logarithmic
-            valUe        = true,         # true: overlay the .mat reference Ue on
-                                          #       the airfoilLE BLQuantitiesCompare plot
-        ),
-        valPIV  = true,  # true: overlay experimental PIV reference data on plots
+        valPIV  = false,  # true: overlay experimental PIV reference data on plots
         Gen     = 0,      # validation generation (reads from Validation/Gen{N}/)
-        Case    = 2,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
-
-        # Spectral integral-boundary-layer (IBL) validation solver — shared by
-        # the DFP (profile overlay) and TTCP (δ99/δ* comparison). When valBL is
-        # true the relevant module runs solver_IBL_spectral (via MATLAB). The
-        # wall-normal grid is Chebyshev: blNcheb nodes over [0, H] with median
-        # node at blYi; blnx streamwise marching points. The domain height H is
-        # taken per case from its own geometry — DFP: domainHeight, TTCP:
-        # airfoilLE exportHeight (height of the exported data box).
-        valBL   = false,    # true to run the IBL solver (overlay/comparison)
-        blNcheb = 120,     # IBL wall-normal Chebyshev node count
-        blYi    = 0.002,   # IBL Chebyshev node median [m] (cluster in the BL)
-        blnx    = 1200,     # IBL streamwise marching points
+        Case    = 0,      # validation case (reads from Validation/Gen{N}/Experimental/Case{M}/)
     ),
 
     # ======================================================================
@@ -237,45 +134,18 @@ const inp = (
     # ======================================================================
     PostProcessing = (
         task           = "importData",         # 'importData' | 'reynoldsOrrProdTerms'
-        loadMode       = "loadFields",             # 'loadBF' | 'loadFields'
+        loadMode       = "loadBF",             # 'loadBF' | 'loadFields'
         caseType       = "TTCP",                # physical case: 'DFP' | 'TTCP' (base-flow source + validation-station mapping)
-        fieldsFile     = "StabRes_cfi_hump_h1mm_l7d5mm.mat",      # (loadFields) from `instAbility DeHNSSo run`
+        fieldsFile     = "StabRes_cfi_flat_plate_Gen0_Case0.mat",      # (loadFields) from `instAbility DeHNSSo run`
         modeIdx        = Int[2,2],           # which spanwise modes to PLOT ([] -> all); the analysis always computes all.
                                              #   Repeated entries are de-duplicated on load (importData), so a mode is
                                              #   never drawn twice or listed twice in a legend.
-        plotUProfiles  = false,              # true: also draw profiles_u.png (non-dimensional u base flow + |u~|).
-                                             #   Off for now; the w-vs-PIV validation figures are unaffected.
         validation     = false,                # w-profile figures are always drawn; this picks how:
                                               #   false: stations in S*/delta_0, DeHNSSo alone (profiles_w_broad.png, amplitude_w.png)
                                               #   true : stations in x/c vs PIV (Gen/Case from the VAL block), needs the airfoil:
                                               #     profiles_w_validation.png       — zoom: stations ARE PIV stations, inside valXcZoom
                                               #     profiles_w_validation_broad.png — broad: stations across the whole numerical
                                               #       domain, with the PIV overlay wherever a station is close to a PIV one
-        valXcZoom      = [5.0, 25.0],        # zoom figure: PIV-station x/c window [%] ([] -> every station in the domain)
-        valShareX      = true,               # w-validation figures: one x-limit per ROW across all stations, so the
-                                             #   streamwise growth is readable. false -> per-panel autoscaling, which
-                                             #   resolves each station's shape but makes every panel look alike.
-        valYTop        = [],                 # w-validation figures: wall-distance limit [delta_0], shared by both rows.
-                                             #   [] -> auto (1.5 x the perturbation extent over the plotted stations)
-        # Plot window — ONE definition, shared by every PostProcessing figure
-        # (base flow, perturbation shapes, profiles, Reynolds–Orr). See
-        # PostProcessing/src/plotting/plotWindow.m.
-        plot = (
-            bufferFrac = 0.85,     # x-axis end, as a fraction of the streamwise extent: where the
-                                   #   DeHNSSo outflow buffer begins, so the damped tail is not shown.
-                                   #   1 -> full domain.
-            # y-axis max above the wall. Each load mode is plotted in the unit system it is
-            # COMPUTED in, and keeps it in the axes and legends too: the stability analysis
-            # runs non-dimensionally, so loadFields stays in delta_0, while loadBF carries
-            # the dimensional OpenFOAM grid. One key each, units stated, no conversion
-            # between them — plotWindow picks the right one from loadMode.
-            yMaxFields = 20.0,     # loadFields: wall-normal max in n/delta_0 ; [] -> yWallFrac
-            yMaxBF     = 0.005,    # loadBF    : wall-normal max in METRES     ; [] -> yWallFrac
-            yWallFrac  = 0.30,     # near-wall fraction of the domain height used when the above is []
-        ),
-        ro = (
-            loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
-        ),
     ),
 
 )

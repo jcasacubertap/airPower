@@ -33,7 +33,7 @@ const ROOT = let
     end
     dir
 end
-include(joinpath(ROOT, "inputs.jl"))
+include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "loadInputs.jl"))   # inputs.jl + settings.jl
 
 using Printf
 

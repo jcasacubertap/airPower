@@ -1,7 +1,8 @@
 # airPower
 
 Swept-wing crossflow-instability pipeline in three stages, driven by one
-top-level dispatcher (`run.jl`) and one config file (`inputs.jl`).
+top-level dispatcher (`run.jl`) and one configuration, split over `inputs.jl`
+(per case/run) and `settings.jl` (set once, rarely touched).
 
 | stage | language | role |
 |-------|----------|------|
@@ -51,10 +52,23 @@ PreProcessing  postProcessing/midPlane.csv|.bin
 
 Filenames use `d` for `.` and `m` for `-` (e.g. `lz7.5mm` → `lz7d5mm`, `A5e-05` → `A5em05`).
 
-## Configuration — `inputs.jl`
+## Configuration — `inputs.jl` + `settings.jl`
 
-One Julia file at the root is the single source of truth. PreProcessing reads it
-natively; for the MATLAB stages the dispatcher **exports** the relevant block to a
+Two Julia files at the root, with the same block layout, form the single source
+of truth:
+- `inputs.jl` — what you set per case or per run (flow, geometry, resolution,
+  bump, validation Gen/Case, PostProcessing load choices);
+- `settings.jl` — set once and rarely touched (meshing details, export options,
+  BL-metrics method, IBL validation grid, plot fine-tuning).
+
+`PreProcessing/src/auxiliary/loadInputs.jl` merges them into one `inp`, so code
+reads `inp.<Case>.<variable>` whichever file holds the entry. A key lives in
+exactly one file; the same entry in both is an error. To carry a case's values
+onto a newer airPower, use
+`julia PreProcessing/src/selfRunning/seedInputs.jl <originCase> <destinationCase>`
+(it handles both files, and an older single-file `inputs.jl` as origin).
+
+PreProcessing reads them natively; for the MATLAB stages the dispatcher **exports** the relevant block to a
 generated MATLAB config (`PostProcessing/inputs_gen.m`, gitignored) — MATLAB never
 parses Julia. (DeHNSSo's own solver parameters currently live in its caller,
 `instAbility/solvers/DeHNSSo/callers/benchmark/<case>.m`.)
@@ -63,8 +77,7 @@ Key `inp.PostProcessing` options:
 - `task` — `importData` | `reynoldsOrrProdTerms` (the CLI `<task>` overrides it)
 - `loadMode`, `fieldsFile` — the Stab input read from `io/input`
 - `validation` — w-profile figures in x/c against PIV (`true`) or in S*/δ₀, DeHNSSo alone (`false`)
-- `loadAnalysis` — `false`: compute + save + plot; `true`: load an `io/output` bundle and re-plot (no recompute)
-- `ro.*` — Reynolds–Orr options (modes, integration window, plot buffer fraction)
+- in `settings.jl`: `ro.loadAnalysis` — `false`: compute + save + plot; `true`: load an `io/output` bundle and re-plot (no recompute); `plot.*` — the shared plot window
 
 ### PostProcessing: two entry points, both honour `inputs.jl`
 
@@ -83,7 +96,8 @@ Key `inp.PostProcessing` options:
 ```
 airPower/
   run.jl            top-level dispatcher
-  inputs.jl         single config source of truth
+  inputs.jl         configuration: per case / run
+  settings.jl       configuration: set once, rarely touched (merged with inputs.jl)
   PreProcessing/
     run.jl          Julia base-flow orchestrator (module dispatch)
     src/ modules/ …

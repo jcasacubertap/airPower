@@ -18,8 +18,8 @@
 # path below (inputs.jl, PreProcessing/src/..., module dirs) stays unchanged.
 const ROOT = dirname(@__DIR__)
 
-# Central inputs (single source of truth for all parameters)
-include(joinpath(ROOT, "inputs.jl"))
+# Central inputs: inputs.jl + settings.jl, merged into `inp`
+include(joinpath(ROOT, "PreProcessing", "src", "auxiliary", "loadInputs.jl"))
 
 # Include all source files
 include(joinpath(ROOT, "PreProcessing", "src", "source", "backend.jl"))

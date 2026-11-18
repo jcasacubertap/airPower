@@ -1,8 +1,9 @@
 #!/usr/bin/env julia
 #
 # seedInputs — copy the numerical input values of an ORIGIN case onto a
-# DESTINATION case's inputs.jl, preserving the destination's structure,
-# comments and any NEW entries it has introduced since the origin was split off.
+# DESTINATION case's inputs.jl and settings.jl, preserving the destination's
+# structure, comments and any NEW entries it has introduced since the origin
+# was split off.
 #
 # Usage:
 #   julia PreProcessing/src/selfRunning/seedInputs.jl <originCase> <destinationCase>
@@ -10,21 +11,27 @@
 #   <originCase>       case whose values you want to reuse (the variant).
 #   <destinationCase>  case to update in place (the fresh canonical).
 #
-# Each argument may be a case directory (its inputs.jl is used) or an inputs.jl
-# file directly. Every leaf entry present in BOTH files (matched by full path,
-# e.g. TTCP.tunnel.chord) takes the origin's value verbatim. Entries only in the
-# destination (new in canonical) keep their current value and are reported for
-# review; entries only in the origin (since removed) are reported too. The
-# destination inputs.jl is backed up to <inputs.jl>.bak before writing.
+# Each argument may be a case directory (its inputs.jl, plus settings.jl when
+# present) or a single .jl file. The configuration of a case is the union of its
+# files, so an entry is matched by its full path (e.g. TTCP.tunnel.chord)
+# whichever file holds it: an older single-file inputs.jl seeds both inputs.jl
+# and settings.jl of a split destination. Every leaf present on both sides takes
+# the origin's value verbatim. Entries only in the destination (new in canonical)
+# keep their current value and are reported for review; entries only in the
+# origin (since removed) are reported too. Each destination file is backed up to
+# <file>.bak before writing.
 
-# --- resolve a case dir or inputs.jl path to the inputs.jl file ------------
+# --- resolve a case dir or a .jl path to its configuration files ----------
+# A case directory gives inputs.jl, plus settings.jl when it exists (cases made
+# before the split have inputs.jl alone).
 function resolve_inputs(path::AbstractString)
     if isdir(path)
         f = joinpath(path, "inputs.jl")
         isfile(f) || error("no inputs.jl in case directory: $(path)")
-        return f
+        s = joinpath(path, "settings.jl")
+        return isfile(s) ? [f, s] : [f]
     elseif isfile(path)
-        return path
+        return [path]
     else
         error("not found: $(path)")
     end
@@ -56,7 +63,7 @@ leaf_assignments(code::AbstractString) =
 function classify(line::AbstractString)
     code = strip(strip_comment(line))
     isempty(code) && return (:skip, nothing)
-    if occursin(r"^const\s+inp\s*=\s*\($", code)
+    if occursin(r"^const\s+[A-Za-z_]\w*\s*=\s*\($", code)   # inp | inputs | settings
         return (:root, nothing)
     elseif (m = match(r"^([A-Za-z_]\w*)\s*=\s*\($", code)) !== nothing
         return (:open, String(m.captures[1]))
@@ -141,25 +148,40 @@ end
 function main()
     length(ARGS) >= 2 ||
         error("usage: julia PreProcessing/src/selfRunning/seedInputs.jl <originCase> <destinationCase>")
-    originInputs = resolve_inputs(ARGS[1])
-    destInputs   = resolve_inputs(ARGS[2])
-    abspath(originInputs) == abspath(destInputs) &&
-        error("origin and destination resolve to the same inputs.jl")
+    originFiles = resolve_inputs(ARGS[1])
+    destFiles   = resolve_inputs(ARGS[2])
+    isempty(intersect(abspath.(originFiles), abspath.(destFiles))) ||
+        error("origin and destination share a file: nothing to seed")
 
-    originMap = collect_values(readlines(originInputs))
-    out, copied, destOnly, originOnly, failed =
-        rewrite(readlines(destInputs), originMap)
-
-    cp(destInputs, destInputs * ".bak"; force = true)
-    open(destInputs, "w") do io
-        for l in out
-            println(io, l)
-        end
+    # the origin's configuration is the union of its files
+    originMap = Dict{Vector{String},String}()
+    for f in originFiles
+        merge!(originMap, collect_values(readlines(f)))
     end
 
+    copied   = 0
+    destOnly = Vector{String}[]
+    failed   = Vector{String}[]
+    seeded   = Set{Vector{String}}()
+    for f in destFiles
+        out, n, dOnly, oOnly, fl = rewrite(readlines(f), originMap)
+        copied += n
+        append!(destOnly, dOnly);  append!(failed, fl)
+        union!(seeded, setdiff(keys(originMap), oOnly))   # used in this file
+        cp(f, f * ".bak"; force = true)
+        open(f, "w") do io
+            for l in out
+                println(io, l)
+            end
+        end
+    end
+    originOnly = [p for p in keys(originMap) if !(p in seeded)]
+
     println("Seeded $(copied) value(s)")
-    println("  origin:      $(originInputs)")
-    println("  destination: $(destInputs)   (backup: $(destInputs).bak)")
+    println("  origin:      ", join(originFiles, ", "))
+    for f in destFiles
+        println("  destination: $(f)   (backup: $(f).bak)")
+    end
     if !isempty(destOnly)
         println("\n⚠  NEW in destination — kept current value, please review:")
         foreach(p -> println("     ", join(p, ".")), sort(destOnly))

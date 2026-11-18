@@ -43,7 +43,7 @@ function find_ancestor_file(start::String, name::String)
     end
 end
 
-include(find_ancestor_file(@__DIR__, "inputs.jl"))
+include(joinpath(dirname(find_ancestor_file(@__DIR__, "inputs.jl")), "PreProcessing", "src", "auxiliary", "loadInputs.jl"))
 
 # Pure bump-shape math (also used by backend.jl / wallModulationTopology.jl)
 let root = find_ancestor_file(@__DIR__, "inputs.jl") |> dirname
