@@ -20,8 +20,9 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
     if nargin < 4; savedir = ''; end
     figs = gobjects(0);
 
-    [X, Y] = plotCoords(sBF, inp);  x = X(1, :);   % wall-fitted rectangle (unwraps curved TTCP wall)
+    [X, Y, lab] = plotCoords(sBF, inp);  x = X(1, :);   % x,y on a Cartesian grid, else wall-fitted s,n
     [xl, yl] = plotWindow(X, Y, inp);          % buffer-cut in x, near-wall window in y
+    if lab.cartesian; args = 'x,y'; else; args = 's,n'; end
 
     % modes to plot (inp.modeIdx; [] -> all)
     Nmode = size(sPert.u, 1);
@@ -58,9 +59,9 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
             cb = colorbar; cb.TickLabelInterpreter = 'latex'; cb.Label.Interpreter = 'latex';
             local_sciColorbar(cb, sprintf('$|%s|_{%s} / u_\\infty$', sym, ms));
             set(gca, 'TickLabelInterpreter', 'latex');
-            xlabel('$S^{*} / \delta_0$', 'Interpreter', 'latex');
-            ylabel('$n / \delta_0$', 'Interpreter', 'latex');
-            title(sprintf('\\textrm{Perturbation shape}\\ \\ $|%s|_{%s}(s,n)$', sym, ms), ...
+            xlabel(lab.x, 'Interpreter', 'latex');
+            ylabel(lab.y, 'Interpreter', 'latex');
+            title(sprintf('\\textrm{Perturbation shape}\\ \\ $|%s|_{%s}(%s)$', sym, ms, args), ...
                   'Interpreter', 'latex');
             xlim(xl);  ylim(yl);
             figs(end+1) = f; %#ok<AGROW>
@@ -88,7 +89,7 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
         plot(ax1, x, Au, '-', 'LineWidth', 1.5, 'Color', colors(i,:));
     end
     set(ax1,'YScale','log'); grid(ax1,'on'); box(ax1,'on'); set(ax1,'TickLabelInterpreter','latex');
-    ylabel(ax1, '$\max_n\,|\tilde{u}| / u_\infty$', 'Interpreter', 'latex');
+    ylabel(ax1, sprintf('$\\max_%s\\,|\\tilde{u}| / u_\\infty$', lab.ys), 'Interpreter', 'latex');
     title(ax1, '\textrm{Chordwise amplitude of}\ \ $\tilde{u}$', 'Interpreter', 'latex');
     xlim(ax1, xl);
     if multi; legend(ax1, leg, 'Interpreter', 'latex', 'Location', 'best'); end
@@ -103,8 +104,8 @@ function figs = plotPerturbationFields(sPert, sBF, inp, savedir)
         plot(ax2, x, AE, '-', 'LineWidth', 1.5, 'Color', colors(i,:));
     end
     set(ax2,'YScale','log'); grid(ax2,'on'); box(ax2,'on'); set(ax2,'TickLabelInterpreter','latex');
-    xlabel(ax2, '$S^{*} / \delta_0$', 'Interpreter', 'latex');
-    ylabel(ax2, '$\max_n\,\frac{1}{2}(|\tilde{u}|^2+|\tilde{v}|^2+|\tilde{w}|^2) / u_\infty^2$', ...
+    xlabel(ax2, lab.x, 'Interpreter', 'latex');
+    ylabel(ax2, sprintf('$\\max_%s\\,\\frac{1}{2}(|\\tilde{u}|^2+|\\tilde{v}|^2+|\\tilde{w}|^2) / u_\\infty^2$', lab.ys), ...
            'Interpreter', 'latex');
     title(ax2, 'Chordwise amplitude of the perturbation energy', 'Interpreter', 'latex');
     xlim(ax2, xl);

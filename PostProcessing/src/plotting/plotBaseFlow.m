@@ -1,33 +1,60 @@
-function fig = plotBaseFlow(sBF, inp, savedir)
+function fig = plotBaseFlow(sBF, inp, savedir, fieldSet)
 % plotBaseFlow  Contour plots of the base-flow fields on the (x,y) grid.
 %
-%   fig = plotBaseFlow(sBF, inp)            % show figure only
-%   fig = plotBaseFlow(sBF, inp, savedir)   % also save baseFlow.png in savedir
+%   fig = plotBaseFlow(sBF, inp)                         % show figure only
+%   fig = plotBaseFlow(sBF, inp, savedir)                % also save baseFlow.png
+%   fig = plotBaseFlow(sBF, inp, savedir, 'gradients')   % baseFlowGradients.png
 %
-% One stacked panel per available field among {u, v, w, p} (loadFields provides
-% u,v,w; loadBF adds p). Base-flow quantities carry a subscript B. Data are
-% plotted as-is; only the labels reflect the units, read from sBF.units:
-%   'nondim' (loadFields, DeHNSSo) -> S*/delta_0, n/delta_0, u_B/u_infty, ...
-%   'SI'     (loadBF, OpenFOAM)    -> S* [m], n [m], u_B [m/s], p_B [m^2/s^2]
+% fieldSet = 'fields' (default): one stacked panel per available field among
+% {u, v, w, p} (loadFields provides u,v,w; loadBF adds p).
+% fieldSet = 'gradients': du/dx, du/dy, dw/dx, dw/dy, the Cartesian gradients both
+% loaders return (loadBF computes them, loadFields reads DeHNSSo's), along
+% the global X, Y; on a curved grid they are labelled X, Y, not x, y.
+% Base-flow quantities carry a subscript B. Data are plotted as-is; only the
+% labels reflect the units, read from sBF.units:
+%   'nondim' (loadFields, DeHNSSo) -> lengths /delta_0, u_B/u_infty,
+%                                     gradients delta_0/u_infty, ...
+%   'SI'     (loadBF, OpenFOAM)    -> lengths [m], u_B [m/s], p_B [m^2/s^2],
+%                                     gradients [1/s]
+% Axes are x, y on a Cartesian grid and S*, n otherwise (see plotCoords).
 % (OpenFOAM pressure is kinematic, p/rho, hence m^2/s^2.)
 %
 % Save behaviour: savedir non-empty -> PNG written there (terminal/dispatcher);
 % empty/omitted -> figure left open for interactive inspection (direct MATLAB).
 
     if nargin < 3; savedir = ''; end
+    if nargin < 4 || isempty(fieldSet); fieldSet = 'fields'; end
 
     nd = isfield(sBF, 'units') && strcmpi(sBF.units, 'nondim');
 
-    if nd
-        xlab = '$S^{*} / \delta_0$';  ylab = '$n / \delta_0$';
+    if strcmpi(fieldSet, 'gradients')
+        name = 'Base-flow gradients';  file = 'baseFlowGradients.png';
+        % 4th column: map for a single-signed panel; du/dy and dw/dy look alike
+        % (both wall-peaked shear), so they get different maps
+        grads = {'ux','u','x','parula'; 'uy','u','y','parula'; ...
+                 'wx','w','x','parula'; 'wy','w','y','turbo'};
+        % The gradients are along the global X, Y. On a curved grid the axes are
+        % the wall-fitted S*, n, so the labels say X, Y (not wall-aligned).
+        [~, ~, lab0] = plotCoords(sBF, inp);
+        if ~lab0.cartesian; grads(:,3) = upper(grads(:,3)); end
+        catalog = cell(size(grads, 1), 3);
+        for k = 1:size(grads, 1)
+            d = sprintf('\\partial %s_{\\mathrm{B}} / \\partial %s', grads{k,2}, grads{k,3});
+            if nd
+                catalog(k,:) = {grads{k,1}, sprintf('$(%s)\\, \\delta_0 / u_\\infty$', d), grads{k,4}};
+            else
+                catalog(k,:) = {grads{k,1}, sprintf('$%s \\; [\\mathrm{1/s}]$', d), grads{k,4}};
+            end
+        end
+    elseif nd
+        name = 'Base flow';  file = 'baseFlow.png';
         catalog = { ...
             'u', '$u_{\mathrm{B}} / u_\infty$'; ...
             'v', '$v_{\mathrm{B}} / u_\infty$'; ...
             'w', '$w_{\mathrm{B}} / u_\infty$'; ...
             'p', '$p_{\mathrm{B}} / (\rho\, u_\infty^2)$'};
     else
-        % SI: S* is measured from the first exported station, not the LE.
-        xlab = '$S^{*} \; [\mathrm{m}]$';  ylab = '$n \; [\mathrm{m}]$';
+        name = 'Base flow';  file = 'baseFlow.png';
         catalog = { ...
             'u', '$u_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
             'v', '$v_{\mathrm{B}} \; [\mathrm{m/s}]$'; ...
@@ -46,13 +73,13 @@ function fig = plotBaseFlow(sBF, inp, savedir)
     catalog = catalog(have,:);
     nF = size(catalog,1);
     if nF == 0
-        warning('plotBaseFlow:noFields', 'No base-flow fields to plot.'); fig = []; return;
+        warning('plotBaseFlow:noFields', 'No base-flow %s to plot.', fieldSet); fig = []; return;
     end
 
-    [X, Y] = plotCoords(sBF, inp);      % wall-fitted rectangle (unwraps curved TTCP wall)
+    [X, Y, lab] = plotCoords(sBF, inp); % x,y on a Cartesian grid, else wall-fitted s,n
     [xl, yl] = plotWindow(X, Y, inp);   % buffer-cut in x, near-wall window in y
 
-    fig = figure('Name', 'Base flow', 'Color', 'w', ...
+    fig = figure('Name', name, 'Color', 'w', ...
                  'Position', [60 60 900 220*nF]);
     for k = 1:nF
         f   = catalog{k,1};
@@ -79,6 +106,7 @@ function fig = plotBaseFlow(sBF, inp, savedir)
             a = max(pos, neg);  lo = -a;  hi = a;  cmap = local_diverging();
         else
             lo = Fmin;  hi = Fmax;  cmap = parula;
+            if size(catalog, 2) >= 3 && ~isempty(catalog{k,3}); cmap = feval(catalog{k,3}); end
         end
         if ~(hi > lo); hi = lo + eps(max(abs(lo),1)); end     % guard constant field
 
@@ -95,14 +123,14 @@ function fig = plotBaseFlow(sBF, inp, savedir)
         local_sciColorbar(cb, lbl);
 
         set(gca, 'TickLabelInterpreter', 'latex');
-        xlabel(xlab, 'Interpreter', 'latex');
-        ylabel(ylab, 'Interpreter', 'latex');
+        xlabel(lab.x, 'Interpreter', 'latex');
+        ylabel(lab.y, 'Interpreter', 'latex');
         xlim(xl);  ylim(yl);
     end
 
     if ~isempty(savedir)
         if ~exist(savedir, 'dir'); mkdir(savedir); end
-        out = fullfile(savedir, 'baseFlow.png');
+        out = fullfile(savedir, file);
         exportgraphics(fig, out, 'Resolution', 150);
         fprintf('plotBaseFlow: saved %s\n', out);
     end

@@ -4,7 +4,7 @@ function plotReynoldsOrrProd(sRO, sBF, inp, savedir)
 %   plotReynoldsOrrProd(sRO, sBF, inp, savedir)
 %
 % One panel per processed mode: filled contour of the production field
-% sRO.P(:,:,m) on the wall-fitted (s,n) grid, like every other field figure. Diverging colormap centred at 0
+% sRO.P(:,:,m) on the plotCoords grid (x,y or s,n), like every other field figure. Diverging colormap centred at 0
 % (red = production of perturbation energy, blue = dissipation). A base-flow
 % U contour is overlaid for reference. Saves reynoldsOrrProd.png in savedir.
 
@@ -13,7 +13,8 @@ function plotReynoldsOrrProd(sRO, sBF, inp, savedir)
     end
     if ~exist(savedir, 'dir'); mkdir(savedir); end
 
-    X = sRO.s;  Y = sRO.n;  P = sRO.P;
+    [X, Y, lab] = plotCoords(sBF, inp);   % same grid as sRO.s/n; x,y when Cartesian
+    P = sRO.P;
     % which computed modes to plot: inp.modeIdx (original sPert indices); [] -> all
     if isfield(inp,'modeIdx') && ~isempty(inp.modeIdx) && isfield(sRO,'modeNo')
         sel = find(ismember(sRO.modeNo, inp.modeIdx(:).'));
@@ -79,8 +80,8 @@ function plotReynoldsOrrProd(sRO, sBF, inp, savedir)
         end
 
         set(gca, 'TickLabelInterpreter', 'latex');
-        xlabel('$S^{*} / \delta_0$', 'Interpreter', 'latex');
-        ylabel('$n / \delta_0$', 'Interpreter', 'latex');
+        xlabel(lab.x, 'Interpreter', 'latex');
+        ylabel(lab.y, 'Interpreter', 'latex');
         xlim([x0 xEnd]);
         ylim([y0 yTop]);
         if isfield(sRO, 'modeNo')

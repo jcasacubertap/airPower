@@ -123,6 +123,7 @@ else
 
         case {'readdata', 'importdata'}
             plotBaseFlow(sBF, inp, savedir);                       % base flow (both modes)
+            plotBaseFlow(sBF, inp, savedir, 'gradients');          % its gradients (both modes)
             if ~isempty(sPert)
                 plotPerturbationFields(sPert, sBF, inp, savedir);  % perturbation shapes + amplitude
                 % wall-normal profiles at stations: u (always, non-dim); and,

@@ -23,11 +23,22 @@ function [sBF, sPert, inp] = importData(inp)
 %
 % Coordinates, the same layout from BOTH loaders:
 %   sBF.s, sBF.n   wall-fitted pair, what every figure plots against:
-%                  s = arc length along the wall from the FIRST WALL POINT OF THE
-%                  BASE-FLOW SOURCE (the S* of the figures). loadBF: the first
-%                  exported station. loadFields: the first wall point of the base
-%                  flow DeHNSSo was fed, so a run on an exported OpenFOAM base flow
-%                  shares loadBF's origin, and a trimmed inflow starts at s > 0.
+%                  s = arc length along the wall (the S* of the figures), the
+%                  same for every point of a column. Its origin, per source:
+%                  loadBF: s = 0 is
+%                    DFP   the inlet face (x = 0 of the case), half a cell upstream
+%                          of the first exported cell centre, so s = x;
+%                    TTCP  the first exported wall point. The export is a window
+%                          cut from the airfoil mesh along the surface normal at
+%                          x/c = xiInlet, not a mesh face, so the first point sits
+%                          0-1 cell downstream of the cut; placing s = 0 on the cut
+%                          would need the airfoil geometry, which the dataset
+%                          does not carry.
+%                  loadFields: s = 0 is the first wall point of the base flow
+%                  DeHNSSo was fed, so a run on an exported
+%                  OpenFOAM base flow shares loadBF's origin, and a trimmed inflow
+%                  starts at s > 0; on a Cartesian (flat-plate) StabGrid s is the
+%                  source's own x, which for DFP is again s = x.
 %                  n = distance up each grid column from the wall.
 %                  (s,n) LABEL GRID POINTS: a point is "on the column whose wall
 %                  point is at s, a length n up that column". Where a mesh column
@@ -262,6 +273,16 @@ function [sBF, inp] = importFromPreProc(inp)
     end
 
     sBF = assembleBodyFitted(T, isWall);
+
+    % DFP: s from the inlet face (x = 0 of the case, blockMeshDict x0), not from
+    % the first exported cell centre half a cell downstream of it. The wall is
+    % flat, so the arc length from the inlet to the first wall point is its x.
+    % TTCP keeps s = 0 at the first exported wall point (see the header).
+    if isfield(inp, 'caseType') && strcmpi(inp.caseType, 'DFP')
+        [~, rw] = min(sBF.n(:, 1));                   % wall row
+        sBF.s = sBF.s + sBF.geom.X(rw, 1);
+    end
+
     sBF.units = 'SI';
     sBF.ref   = struct();     % the midPlane export carries no reference scales
 

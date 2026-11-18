@@ -15,7 +15,8 @@ function figs = plotProfiles(sBF, sPert, inp, savedir)
 % the streamwise station. inp.validation only decides how:
 %   true   stations in x/c, with the PIV Gen/Case overlay, plus a zoom on the
 %          PIV stations inside inp.valXcZoom (needs the airfoil geometry);
-%   false  stations in S*/delta_0, DeHNSSo alone -- nothing airfoil-related.
+%   false  stations in x/delta_0 (S*/delta_0 on a curved grid), DeHNSSo alone
+%          -- nothing airfoil-related.
 %
 % Save behaviour: savedir non-empty -> PNGs written there (terminal/dispatcher);
 % empty/omitted -> figures left open for interactive inspection (direct MATLAB).
@@ -44,7 +45,7 @@ end
 
 function f = uFigure(sBF, sPert, inp, savedir)
 
-    [X, Y] = plotCoords(sBF, inp);             % wall-fitted rectangle (unwraps curved TTCP wall)
+    [X, Y, lab] = plotCoords(sBF, inp);        % x,y on a Cartesian grid, else wall-fitted s,n
     Nx = size(X, 2);
     [~, yl, bufFrac] = plotWindow(X, Y, inp);  % near-wall y window + buffer cut
 
@@ -76,8 +77,8 @@ function f = uFigure(sBF, sPert, inp, savedir)
         plot(sBF.u(:, c), yc, '-', 'LineWidth', 1.5, 'Color', [0 0 0]);
         set(gca, 'TickLabelInterpreter', 'latex'); box on; grid on;
         xlabel('$u_{\mathrm{B}} / u_\infty$', 'Interpreter', 'latex');
-        if j == 1; ylabel('$n / \delta_0$', 'Interpreter', 'latex'); end
-        title(sprintf('$S^{*}/\\delta_0 = %.0f$', xs(j)), 'Interpreter', 'latex');
+        if j == 1; ylabel(lab.y, 'Interpreter', 'latex'); end
+        title(sprintf('$%s %s = %.0f$', lab.xs, lab.unit, xs(j)), 'Interpreter', 'latex');
         ylim(yl);
 
         % bottom row: perturbation |u~| for the selected modes
@@ -88,7 +89,7 @@ function f = uFigure(sBF, sPert, inp, savedir)
         end
         set(gca, 'TickLabelInterpreter', 'latex'); box on; grid on;
         xlabel('$|\tilde{u}| / u_\infty$', 'Interpreter', 'latex');
-        if j == 1; ylabel('$n / \delta_0$', 'Interpreter', 'latex'); end
+        if j == 1; ylabel(lab.y, 'Interpreter', 'latex'); end
         ylim(yl);
         if j == ns
             legend(arrayfun(@(m) sprintf('$(0,%d)$', m-1), modes, 'UniformOutput', false), ...

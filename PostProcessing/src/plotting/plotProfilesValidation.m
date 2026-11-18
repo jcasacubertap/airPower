@@ -70,7 +70,8 @@ function figs = plotProfilesValidation(sBF, sPert, inp, savedir)
 %   TTCP (curved airfoil wall):   the stability-grid wall row IS the airfoil
 %        surface, so each column's x/c is recovered by the inverse rigid transform
 %        (undo AoA rotation + centre offset) of its physical wall point.
-% Wall distance is sBF.n for both, the arc length up the grid column.
+% Wall distance is sBF.n for both, the arc length up the grid column. Axes and
+% titles follow plotCoords: x, y on a Cartesian grid (flat plate), S*, n otherwise.
 %
 % With inp.validation false, or without an airfoil (no geometry in inp / no
 % airfoilFlowData, an unknown caseType, or no lref/Uref in the data) there is no
@@ -184,16 +185,19 @@ end
 %
 %  G.useXc     true when the columns could be mapped to x/c (an airfoil is known)
 %  G.pos       1 x Nx station coordinate the figures select and plot by:
-%              x/c [%] when useXc, else S*/delta_0
+%              x/c [%] when useXc, else G.sd0
 %  G.posLabel  its axis label;  G.posFmt  its number format in panel titles
-%  G.sd0       1 x Nx, wall arc length sBF.s (from the base-flow source), in delta_0
-%              (same S*/delta_0 the plotProfiles u-figure titles use)
-%  G.wallDist  @(c) -> Ny x 1 wall distance n for column c [delta_0]
+%  G.sd0       1 x Nx, streamwise coordinate of each column from plotCoords, in
+%              delta_0: x on a Cartesian grid, else the wall arc length S*
+%              (same as the plotProfiles u-figure titles)
+%  G.wallDist  @(c) -> Ny x 1 wall distance (y or n) for column c [delta_0]
+%  G.lab       plotCoords labels (symbols, units, axis labels)
 %  G.Nx        number of columns
 % ======================================================================
 function G = gridMap(sBF, inp, lref)
-    G.sd0      = sBF.s(end,:);                % S* from importData, in delta_0
-    G.wallDist = @(c) sBF.n(:, c);            % importData's n (arc length up the column)
+    [Xp, Yp, G.lab] = plotCoords(sBF, inp);   % x,y on a Cartesian grid, else s,n
+    G.sd0      = Xp(end,:);                   % streamwise coordinate, in delta_0
+    G.wallDist = @(c) Yp(:, c);               % wall distance up the column
     G.Nx       = numel(G.sd0);
 
     xic = [];
@@ -205,7 +209,7 @@ function G = gridMap(sBF, inp, lref)
     if G.useXc
         G.pos = 100 * xic;   G.posLabel = '$x/c \ [\%]$';        G.posFmt = '%.1f';
     else
-        G.pos = G.sd0;       G.posLabel = '$S^{*} / \delta_0$';   G.posFmt = '%.0f';
+        G.pos = G.sd0;       G.posLabel = G.lab.x;                G.posFmt = '%.0f';
     end
 end
 
@@ -323,12 +327,13 @@ end
 % as text, `title` the panel title (x/c with S*/delta_0, or S*/delta_0 alone)
 function s = mkStation(G, c, pos, fmt, korig)
     if G.useXc
-        ttl = sprintf('$x/c = %s\\%%$ \\ \\ $(S^{*}/\\delta_0 = %.0f)$', sprintf(fmt, pos), G.sd0(c));
+        ttl = sprintf('$x/c = %s\\%%$ \\ \\ $(%s %s = %.0f)$', sprintf(fmt, pos), G.lab.xs, G.lab.unit, G.sd0(c));
     else
-        ttl = sprintf('$S^{*}/\\delta_0 = %.0f$', G.sd0(c));
+        ttl = sprintf('$%s %s = %.0f$', G.lab.xs, G.lab.unit, G.sd0(c));
     end
     s = struct('pos', pos, 'label', sprintf(fmt, pos), 'title', ttl, ...
-               'sd0', G.sd0(c), 'col', c, 'n', G.wallDist(c), 'korig', korig);
+               'sd0', G.sd0(c), 'col', c, 'n', G.wallDist(c), 'korig', korig, ...
+               'ys', G.lab.ys, 'ylab', G.lab.y);
 end
 
 function i = findNearest(v, t)
@@ -410,7 +415,7 @@ function fig = plotStations(S, sBF, sPert, o, inp, m, yTop)
         annot(ax, peakText(d), ratioColor(d.ratio));
     end
 
-    ylabel(t, '$n / \delta_0$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(t, S(1).ylab, 'Interpreter', 'latex', 'FontSize', 12);
     sharedLegend(t, L);
 end
 
@@ -423,6 +428,7 @@ function D = collectStations(S, sBF, sPert, o, m, yTop)
     for j = 1:numel(S)
         c = S(j).col;  k = S(j).korig;
         d = emptyCurves(yTop);
+        d.ys = S(j).ys;
         d.y = S(j).n(:);                             % wall distance [delta_0]
         [d.wMean, d.wBase, d.hasMFD] = meanW(sBF, sPert, c);
         wr = abs(squeeze(sPert.w(m,:,c))) / sqrt(2);
@@ -447,7 +453,7 @@ function D = collectStations(S, sBF, sPert, o, m, yTop)
 end
 
 function d = emptyCurves(yTop)
-    d = struct('y', [], 'yTop', yTop, 'hasMFD', false, ...
+    d = struct('y', [], 'ys', 'n', 'yTop', yTop, 'hasMFD', false, ...
                'wMean', [], 'wBase', [], 'wRms', [], ...
                'wMeanExp', [], 'yMeanExp', [], 'wRmsExp', [], 'yRmsExp', [], ...
                'pkN', NaN, 'ypkN', NaN, 'pkP', NaN, 'ypkP', NaN, 'ratio', NaN);
@@ -511,10 +517,10 @@ function lines = peakText(d)
     if isfinite(d.pkP)
         lines = {sprintf('$\\hat{w}_{\\max}:\\ %.3f\\,/\\,%.3f$', d.pkN, d.pkP), ...
                  sprintf('$N/P = %.2f$', d.ratio), ...
-                 sprintf('$y_{\\max}:\\ %.2f\\,/\\,%.2f$', d.ypkN, d.ypkP)};
+                 sprintf('$%s_{\\max}:\\ %.2f\\,/\\,%.2f$', d.ys, d.ypkN, d.ypkP)};
     else
         lines = {sprintf('$\\hat{w}_{\\max} = %.3f$', d.pkN), ...
-                 sprintf('$y_{\\max} = %.2f$', d.ypkN)};
+                 sprintf('$%s_{\\max} = %.2f$', d.ys, d.ypkN)};
     end
 end
 
@@ -629,7 +635,7 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, yTop)
     local_style(ax1);  logY(ax1, yl1);
     xlim(ax1, xcLim);
     set(ax1, 'XTickLabel', []);
-    ylabel(ax1, '$\max_n w_{\mathrm{rms}} / u_\infty$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax1, sprintf('$\\max_%s w_{\\mathrm{rms}} / u_\\infty$', G.lab.ys), 'Interpreter', 'latex', 'FontSize', 12);
     title(ax1, sprintf('\\textrm{Total~}$(%s$\\textrm{, in quadrature)}', modeListTex(hrm)), ...
           'Interpreter', 'latex', 'FontSize', 12);
     legend(ax1, hs, labs, 'Interpreter', 'latex', 'Location', 'northwest', 'FontSize', 11);
@@ -649,7 +655,7 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, yTop)
     local_style(ax2);  logY(ax2, yl2);
     xlim(ax2, xcLim);
     xlabel(ax2, G.posLabel, 'Interpreter', 'latex', 'FontSize', 12);
-    ylabel(ax2, '$\max_n w_{\mathrm{rms}} / u_\infty$', 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax2, sprintf('$\\max_%s w_{\\mathrm{rms}} / u_\\infty$', G.lab.ys), 'Interpreter', 'latex', 'FontSize', 12);
     title(ax2, '\textrm{Per spanwise mode}', 'Interpreter', 'latex', 'FontSize', 12);
 
     % Legend: the two style keys (neutral black) then one entry per mode colour,
@@ -666,7 +672,7 @@ function [fig, nPIV] = plotAmplitude(G, sPert, o, inp, m, yTop)
     legend(ax2, [kh, hM], [kl, labM], 'Interpreter', 'latex', 'FontSize', 10, ...
            'Orientation', 'horizontal', 'Location', 'southoutside', 'Box', 'off');
 
-    title(t, sprintf('\\textrm{Streamwise evolution~}$(\\max_n$\\textrm{~over~}$n/\\delta_0 \\leq %.1f$\\textrm{)}', yTop), ...
+    title(t, sprintf('\\textrm{Streamwise evolution~}$(\\max_%s$\\textrm{~over~}$%s/\\delta_0 \\leq %.1f$\\textrm{)}', G.lab.ys, G.lab.ys, yTop), ...
           'Interpreter', 'latex', 'FontSize', 13);
 end
 
@@ -874,7 +880,8 @@ end
 % ======================================================================
 function S = emptyStations()
     % same field order as mkStation
-    S = struct('pos', {}, 'label', {}, 'title', {}, 'sd0', {}, 'col', {}, 'n', {}, 'korig', {});
+    S = struct('pos', {}, 'label', {}, 'title', {}, 'sd0', {}, 'col', {}, 'n', {}, 'korig', {}, ...
+               'ys', {}, 'ylab', {});
 end
 
 % column index at a given fraction of the streamwise extent
