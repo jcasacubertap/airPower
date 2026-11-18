@@ -249,6 +249,8 @@ function write_pp_config(pp, task)
         println(io, "inp.airfoilXCenter  = $(mat_lit(inp.TTCP.tunnel.xCenter));")   # [m]
         println(io, "inp.airfoilYCenter  = $(mat_lit(inp.TTCP.tunnel.yCenter));")   # [m]
         println(io, "inp.ro.loadAnalysis = $(mat_lit(pp.ro.loadAnalysis));")
+        println(io, "inp.ro.climManual   = $(mat_lit(hasproperty(pp.ro, :climManual) ? pp.ro.climManual : false));")
+        println(io, "inp.ro.clim         = $(mat_lit(hasproperty(pp.ro, :clim)       ? pp.ro.clim       : []));")
         # Shared plot window. An inputs.jl predating the `plot` block still runs:
         # bufferFrac/yWallFrac carry over from `ro`. The y-ceilings do not — the old
         # single `ro.yMax` could not say which load mode it meant, so it is left to

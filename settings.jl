@@ -178,12 +178,16 @@ const settings = (
             # runs non-dimensionally, so loadFields stays in delta_0, while loadBF carries
             # the dimensional OpenFOAM grid. One key each, units stated, no conversion
             # between them — plotWindow picks the right one from loadMode.
-            yMaxFields = 20.0,     # loadFields: wall-normal max in n/delta_0 ; [] -> yWallFrac
+            yMaxFields = 8.0,     # loadFields: wall-normal max in n/delta_0 ; [] -> yWallFrac
             yMaxBF     = 0.005,    # loadBF    : wall-normal max in METRES     ; [] -> yWallFrac
             yWallFrac  = 0.30,     # near-wall fraction of the domain height used when the above is []
         ),
         ro = (
             loadAnalysis = false,      # false: compute + save + plot; true: load io/output bundle & re-plot (no recompute)
+            climManual   = false,      # colour range of the production figures (reynoldsOrrProd/Decomp):
+                                       #   false: automatic, symmetric +-(99th percentile of |P|) in the plot window;
+                                       #   true : fixed to clim below
+            clim         = [-1.0, 1.0],  # [lower, upper] colour limits, in the figures' units (P/u_inf^3), when climManual
         ),
     ),
 
