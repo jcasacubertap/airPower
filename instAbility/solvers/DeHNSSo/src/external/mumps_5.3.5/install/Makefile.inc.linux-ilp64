@@ -1,0 +1,55 @@
+# MUMPS 5.3.5 library — Linux x86-64, serial, ILP64, for DeHNSSo.
+#
+# ILP64 (64-bit Fortran integers) is REQUIRED here, not optional: the factors of
+# a 1M-DOF Jacobian hold more than 2^31 entries (AMD 6.0e9, METIS 2.8e9), so a
+# 32-bit build overflows during analysis and segfaults.
+#
+# Settings that break the build or the run if changed:
+#   -fdefault-integer-8 in OPTF and -DINTSIZE64 in CDEFS must agree
+#   -fPIC everywhere, since this is linked into a MEX shared object
+#   AR keeps its TRAILING SPACE (the libseq Makefile does $(AR)$@)
+#   PORD is compiled in but METIS is what DeHNSSo selects (ICNTL(7)=5/7)
+#
+# METIS must be built from source with 64-bit indices; the system libmetis is
+# 32-bit and crashes. install_mumps_linux.sh does this and sets METIS64DIR.
+
+LPORDDIR  = $(topdir)/PORD/lib/
+IPORD     = -I$(topdir)/PORD/include/
+LPORD     = -L$(LPORDDIR) -lpord
+LMETISDIR = $(METIS64DIR)/lib
+IMETIS    = -I$(METIS64DIR)/include
+LMETIS    = -L$(LMETISDIR) -lmetis
+
+ORDERINGSF  = -Dpord -Dmetis
+ORDERINGSC  = $(ORDERINGSF)
+LORDERINGS  = $(LMETIS) $(LPORD)
+IORDERINGSF =
+IORDERINGSC = $(IMETIS) $(IPORD)
+
+PLAT    =
+LIBEXT  = .a
+OUTC    = -o
+OUTF    = -o
+RM      = /bin/rm -f
+CC      = gcc
+FC      = gfortran
+FL      = gfortran
+AR      = ar vr 
+RANLIB  = ranlib
+
+# MATLAB's BLAS is ILP64 on Linux, so it matches this build. (On macOS the same
+# choice CRASHES, because MUMPS is LP64 there and the integer widths disagree.)
+LAPACK  = -L$(MATLABROOT)/bin/glnxa64 -lmwlapack -lmwblas
+INCSEQ  = -I$(topdir)/libseq
+LIBSEQ  = $(LAPACK) -L$(topdir)/libseq -lmpiseq
+LIBBLAS = -L$(MATLABROOT)/bin/glnxa64 -lmwlapack -lmwblas
+LIBOTHERS = -lpthread
+
+CDEFS   = -DAdd_ -DINTSIZE64
+OPTF    = -O -fPIC -fallow-argument-mismatch -fdefault-integer-8
+OPTL    = -O -fPIC
+OPTC    = -O -fPIC
+
+INCS = $(INCSEQ)
+LIBS = $(LIBSEQ)
+LIBSEQNEEDED = libseqneeded

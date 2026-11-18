@@ -1,0 +1,52 @@
+# MUMPS 5.3.5 library — macOS / Apple Silicon, serial (no MPI), for DeHNSSo.
+#
+# Only the double-real arithmetic is used, so build with `make d`.
+# Three settings here are not guessable and break the build if changed:
+#   AR must keep its TRAILING SPACE  (the libseq Makefile does $(AR)$@)
+#   OPTF needs -fallow-argument-mismatch on gfortran 10+
+#   there must be NO -fopenmp anywhere: Apple clang does not have it
+#
+# BLAS is Accelerate, so OpenBLAS is not required. It is only used to link
+# MUMPS's own example programs; the archive itself carries no BLAS.
+
+LPORDDIR = $(topdir)/PORD/lib/
+IPORD    = -I$(topdir)/PORD/include/
+LPORD    = -L$(LPORDDIR) -lpord
+
+# METIS is optional. To build without it, drop -Dmetis from ORDERINGSF and
+# set LMETIS/IMETIS empty; DeHNSSo defaults to AMD (ICNTL(7)=0) regardless.
+LMETISDIR = /opt/homebrew/opt/metis/lib
+IMETIS    = -I/opt/homebrew/opt/metis/include
+LMETIS    = -L$(LMETISDIR) -lmetis
+
+ORDERINGSF  = -Dpord -Dmetis
+ORDERINGSC  = $(ORDERINGSF)
+LORDERINGS  = $(LMETIS) $(LPORD)
+IORDERINGSF =
+IORDERINGSC = $(IMETIS) $(IPORD)
+
+PLAT    =
+LIBEXT  = .a
+OUTC    = -o
+OUTF    = -o
+RM      = /bin/rm -f
+CC      = clang
+FC      = /opt/homebrew/bin/gfortran
+FL      = /opt/homebrew/bin/gfortran
+AR      = ar vr 
+RANLIB  = ranlib
+
+LAPACK  = -framework Accelerate
+INCSEQ  = -I$(topdir)/libseq
+LIBSEQ  = $(LAPACK) -L$(topdir)/libseq -lmpiseq
+LIBBLAS = -framework Accelerate
+LIBOTHERS = -lpthread
+
+CDEFS   = -DAdd_
+OPTF    = -O -fallow-argument-mismatch
+OPTL    = -O
+OPTC    = -O
+
+INCS = $(INCSEQ)
+LIBS = $(LIBSEQ)
+LIBSEQNEEDED = libseqneeded

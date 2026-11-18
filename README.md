@@ -20,16 +20,18 @@ via `AIRPOWER_MATLAB`, e.g. `AIRPOWER_MATLAB=/Applications/MATLAB_R2025b.app/bin
 julia run.jl PreProcessing DirectFlatPlate all
 julia run.jl PreProcessing TunnelToCurvedPlate all
 
-# instAbility — DeHNSSo stability solver        (case: sweptwing_flat)
-julia run.jl instAbility DeHNSSo mesh sweptwing_flat   # midPlane -> gridgen -> StabGrid
-julia run.jl instAbility DeHNSSo run  sweptwing_flat   # solver   -> StabRes (-> PostProcessing/io/input)
+# instAbility — DeHNSSo stability solver        (case: cfi_flat_plate, cfi_hump, …)
+julia run.jl instAbility DeHNSSo mesh cfi_flat_plate   # midPlane -> gridgen -> StabGrid -> grid figure
+julia run.jl instAbility DeHNSSo run  cfi_flat_plate   # solver   -> StabRes (-> PostProcessing/io/input)
 
 # PostProcessing — analysis                     (task: importData | reynoldsOrrProdTerms)
 julia run.jl PostProcessing reynoldsOrrProdTerms
 ```
 
-(`instAbility DeHNSSo` is wired for `sweptwing_flat`; `m3j` and `AmplitudeFinisher`
-are not in the dispatcher yet.)
+(`<case>` is the name of a DeHNSSo `gridgen/benchmark/<case>.m` + `callers/benchmark/<case>.m`
+pair. Only `cfi_flat_plate` has its base flow staged from PreProcessing; other cases mesh the
+base flow already in `baseflow/output/benchmark/`. `mesh` saves a grid-assessment figure to
+`instAbility/io/plotting/DeHNSSo/<case>_grid.png`. `AmplitudeFinisher` is not in the dispatcher.)
 
 ## Data flow (coupling)
 
@@ -37,7 +39,7 @@ are not in the dispatcher yet.)
 PreProcessing  postProcessing/midPlane.csv|.bin
       │  julia run.jl instAbility DeHNSSo mesh <case>
       ▼
-   bf_<case>.csv ── gridgen ──► DeHNSSo_input.mat            (StabGrid = base flow)
+   bf_<case>.csv ── gridgen ──► DeHNSSo_input_<case>.mat     (StabGrid = base flow)
       │  julia run.jl instAbility DeHNSSo run <case>
       ▼
    PostProcessing/io/input/<case>_<lin|nl>_N<N>_lz<λz>mm_A<A0>.mat   (StabRes + StabGrid)
@@ -55,11 +57,12 @@ One Julia file at the root is the single source of truth. PreProcessing reads it
 natively; for the MATLAB stages the dispatcher **exports** the relevant block to a
 generated MATLAB config (`PostProcessing/inputs_gen.m`, gitignored) — MATLAB never
 parses Julia. (DeHNSSo's own solver parameters currently live in its caller,
-`instAbility/DeHNSSo/callers/benchmark/<case>.m`.)
+`instAbility/solvers/DeHNSSo/callers/benchmark/<case>.m`.)
 
 Key `inp.PostProcessing` options:
 - `task` — `importData` | `reynoldsOrrProdTerms` (the CLI `<task>` overrides it)
 - `loadMode`, `fieldsFile` — the Stab input read from `io/input`
+- `validation` — w-profile figures in x/c against PIV (`true`) or in S*/δ₀, DeHNSSo alone (`false`)
 - `loadAnalysis` — `false`: compute + save + plot; `true`: load an `io/output` bundle and re-plot (no recompute)
 - `ro.*` — Reynolds–Orr options (modes, integration window, plot buffer fraction)
 
@@ -85,8 +88,11 @@ airPower/
     run.jl          Julia base-flow orchestrator (module dispatch)
     src/ modules/ …
   instAbility/
-    DeHNSSo/        stability solver (gridgen + callers)
-    AmplitudeFinisher/   (standalone; not yet in the dispatcher)
+    solvers/DeHNSSo/          stability solver, v2 (gridgen + callers + src + docs)
+    solvers/TrOY/             transient-growth / optimal-decay tooling
+    applications/AmplitudeFinisher/   (standalone; not in the dispatcher)
+    src/SolverCoupling/       airPower glue (grid-assessment figure)
+    io/plotting/DeHNSSo/      <case>_grid.png                [gitignored]
   PostProcessing/
     run.m           MATLAB entry (loads the generated inputs_gen.m)
     src/            importData, reynoldsOrrProdTerms, plotters

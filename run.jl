@@ -28,9 +28,9 @@ airPower dispatcher
       module  : DirectFlatPlate | TunnelToCurvedPlate
       action  : all | clean | prep | viz | ...
   julia run.jl instAbility DeHNSSo <mesh|run> <case>
-      mesh    : PreProcessing midPlane -> gridgen -> StabGrid
+      mesh    : base flow -> gridgen -> StabGrid, then the assessment figure
       run     : DeHNSSo caller -> StabRes (-> PostProcessing/io/input/<encoded>.mat)
-      case    : sweptwing_flat
+      case    : cfi_curved_airfoil | cfi_flat_plate
   julia run.jl PostProcessing <task>
       task    : importData | reynoldsOrrProdTerms
 """)
@@ -130,7 +130,7 @@ function run_instability(args)
         error("usage: julia run.jl instAbility DeHNSSo <mesh|run> <case>")
     modul, sub, case_ = args[1], args[2], args[3]
     modul == "DeHNSSo" || error("instAbility: only 'DeHNSSo' is wired (got '$modul').")
-    dehnsso = joinpath(ROOT, "instAbility", "DeHNSSo")
+    dehnsso = joinpath(ROOT, "instAbility", "solvers", "DeHNSSo")
     if sub == "mesh"
         dehnsso_mesh(dehnsso, case_)
     elseif sub == "run"
@@ -140,20 +140,61 @@ function run_instability(args)
     end
 end
 
-# mesh: copy PreProcessing midPlane -> base-flow csv, then run gridgen -> StabGrid
+# Where a case's base flow is staged from, when the dispatcher knows. Cases not
+# listed are expected to have their base flow already in baseflow/output/benchmark.
+const MESH_SOURCE = Dict(
+    "cfi_flat_plate" => joinpath("PreProcessing", "modules", "directFlatPlateModule",
+                                 "postProcessing", "midPlane.csv"),
+)
+
+# Context for plotStabGrid.m, as one MATLAB statement: where to save the figure,
+# and which solver caller to read beta_0/N from. Never fatal: without the caller
+# the figure simply leaves out the per-harmonic resolution table.
+function plot_context(case_, dehnsso)
+    parts = String[]
+    # -batch has no display, so the figure is written to disk instead.
+    push!(parts, "figfile = '" * grid_figure(case_) * "';")
+
+    # Only the caller's PATH is passed: plotStabGrid.m reads beta_0 and N from it
+    # inside MATLAB. Callers write beta_0 as an expression (2*pi*StabGrid.lref/
+    # lambda_z), and the `matlab` launcher is a shell script that would
+    # glob-expand a bare `*` in it, so the expression must never cross the shell.
+    caller = joinpath(dehnsso, "callers", "benchmark", "$(case_).m")
+    isfile(caller) && push!(parts, "stabCaller = '" * caller * "';")
+    return join(parts, " ")
+end
+
+# Where `mesh` writes the grid-assessment figure (<case>_grid.png, without
+# the extension), next to the other stages' figures in <stage>/io/plotting.
+function grid_figure(case_)
+    dir = joinpath(ROOT, "instAbility", "io", "plotting", "DeHNSSo")
+    mkpath(dir)
+    return joinpath(dir, "$(case_)_grid")
+end
+
+# mesh: stage the base flow (when known), run gridgen -> StabGrid, then show the
+# assessment figure so the grid can be inspected before the solver is run.
 function dehnsso_mesh(dehnsso, case_)
-    case_ == "sweptwing_flat" ||
-        error("mesh: only 'sweptwing_flat' is wired for now (got '$case_').")
-    src = joinpath(ROOT, "PreProcessing", "modules", "directFlatPlateModule",
-                   "postProcessing", "midPlane.csv")
-    isfile(src) ||
-        error("mesh: source midPlane not found:\n  $src\n(run PreProcessing DirectFlatPlate first)")
-    dst = joinpath(dehnsso, "baseflow", "output", "benchmark", "bf_$(case_).csv")
-    @info "airPower ▶ instAbility DeHNSSo mesh" src dst
-    cp(src, dst; force = true)
     gridgen = joinpath(dehnsso, "gridgen", "benchmark", "$(case_).m")
     isfile(gridgen) || error("mesh: gridgen script not found: $gridgen")
-    matlab_batch("run('$gridgen')")
+
+    if haskey(MESH_SOURCE, case_)
+        src = joinpath(ROOT, MESH_SOURCE[case_])
+        isfile(src) || error("mesh: source not found:\n  $src\n(run the matching PreProcessing module first)")
+        dst = joinpath(dehnsso, "baseflow", "output", "benchmark", "bf_$(case_).csv")
+        @info "airPower ▶ instAbility DeHNSSo mesh: staging base flow" src dst
+        cp(src, dst; force = true)
+    else
+        @info "airPower ▶ instAbility DeHNSSo mesh: using the base flow already in baseflow/output/benchmark" case_
+    end
+
+    plotter = joinpath(ROOT, "instAbility", "src", "SolverCoupling", "DeHNSSo", "plotStabGrid.m")
+    # gridgen's case script starts with `clear all`, so the context is injected
+    # after it runs, not before.
+    matlab_batch(string("run('$gridgen'); ", plot_context(case_, dehnsso),
+                        " run('$plotter');"))
+    fig = grid_figure(case_) * ".png"
+    isfile(fig) && @info "airPower ▶ instAbility DeHNSSo mesh: grid assessment figure" fig
 end
 
 # run: run the solver caller, then save StabRes+StabGrid for PostProcessing.

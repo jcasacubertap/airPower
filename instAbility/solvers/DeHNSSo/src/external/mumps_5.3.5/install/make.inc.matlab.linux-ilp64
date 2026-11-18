@@ -1,0 +1,27 @@
+# MUMPS 5.3.5 MATLAB MEX — Linux x86-64, ILP64.
+#
+# Three things matter here:
+#   -DINTSIZE64 must match the library build, or the gateway writes 4-byte
+#   integers into 8-byte arrays.
+#   MATLAB's BLAS is ILP64 on Linux, so it is the right BLAS for this build.
+#   METIS is linked STATICALLY with hidden symbols, so the MEX binds our
+#   64-bit METIS 5 and not MATLAB's incompatible METIS 4 (libmwmetis.so).
+#
+# mumpsmex.c also needs the ILP64 gateway patch; see mumpsmex_ilp64.patch.
+
+MEX = $(MATLABROOT)/bin/mex -R2017b
+
+MUMPS_DIR = $(MUMPSDIR)
+
+# -L/-l form, NOT a bare path to libmetis.a: mex reads a bare path as a source
+# file and drops it, which shows up as undefined METIS_* at link time.
+LMETIS     = -L$(METIS64DIR)/lib -lmetis
+LPORD      = -L$(MUMPSDIR)/PORD/lib -lpord
+LORDERINGS = $(LMETIS) $(LPORD)
+
+LIBFORT = -lgfortran -lquadmath
+
+LIBBLAS = -L$(MATLABROOT)/bin/glnxa64 -lmwlapack -lmwblas \
+          LDFLAGS='$$LDFLAGS -Wl,-Bsymbolic-functions -Wl,--exclude-libs,ALL'
+
+OPTC = -O -DINTSIZE64

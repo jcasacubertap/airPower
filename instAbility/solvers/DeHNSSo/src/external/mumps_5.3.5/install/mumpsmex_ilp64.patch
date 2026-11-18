@@ -1,0 +1,38 @@
+ILP64 gateway fix for MUMPS 5.3.5 MATLAB/mumpsmex.c
+===================================================
+Only needed on Linux, where DeHNSSo builds MUMPS with 64-bit integers
+(-fdefault-integer-8 / -DINTSIZE64) because the factors of a 1M-DOF Jacobian
+exceed 2^31 entries.
+
+The stock gateway allocates these arrays as C `int` (4 bytes) while the ILP64
+library writes MUMPS_INT (8 bytes) into them: a heap overflow that shows up as
+"free(): invalid next size" when the instance is destroyed.
+
+install_mumps_linux.sh applies this with sed. The lines are:
+
+  line 334   MYMALLOC((dmumps_par->jcn),(int)netrue,int);
+             ->  MYMALLOC((dmumps_par->jcn),(int)netrue,MUMPS_INT);
+
+  line 335   MYMALLOC((dmumps_par->irn),(int)netrue,int);
+             ->  MYMALLOC((dmumps_par->irn),(int)netrue,MUMPS_INT);
+
+  line 416   EXTRACT_FROM_MATLAB_TOPTR(PERM_IN,(dmumps_par->perm_in),int,((int)n));
+             ->  ...,MUMPS_INT,((int)n));
+
+  line 431   EXTRACT_FROM_MATLAB_TOPTR(VAR_SCHUR,(dmumps_par->listvar_schur),int,...);
+             ->  ...,MUMPS_INT,...);
+
+irhs_sparse (line 503) is left as int: it is unused with a dense RHS, which is
+all DeHNSSo sends.
+
+64-bit nonzero counts (added 18 Sep 2026)
+-----------------------------------------
+The gateway also casts the nonzero count to C int: the array lengths
+(int)netrue on lines 316-319, nz = (int)ne on line 339, and the loop counters
+`int i,j,pos` on line 234. A Jacobian with more than 2^31 nonzeros therefore
+fails with "Malloc failed in mumpsmex.c" (the length wraps negative). The
+installer widens them: `mwSize i,j,pos`, `(size_t)netrue` in the three
+MYMALLOCs, `(MUMPS_INT)netrue` for nz_alloc, `(MUMPS_INT)ne` for nz, and
+`(MUMPS_INT)irn_in[j]` for the two row-index copies. MUMPS_INT is 8 bytes in
+this build, so nz holds the count. First hit on a 2500x80 Chebyshev, N = 5
+swept-plate Jacobian with 2.93e9 nonzeros.

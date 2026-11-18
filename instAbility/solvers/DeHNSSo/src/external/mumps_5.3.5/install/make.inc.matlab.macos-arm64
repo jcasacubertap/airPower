@@ -1,0 +1,26 @@
+# MUMPS 5.3.5 MATLAB MEX — macOS / Apple Silicon.
+#
+# Two settings are not guessable:
+#   -R2017b and NOT -largeArrayDims. R2025b rejects the pair, and -R2017b keeps
+#   the legacy mxGetPr API that mumpsmex.c uses.
+#   LIBBLAS goes through LDFLAGS. `mex` does not parse a bare -framework, and
+#   linking MATLAB's own BLAS (-lmwlapack -lmwblas) CRASHES: its integer width
+#   does not match MUMPS built with default 32-bit integers.
+
+MEX = /Applications/MATLAB_R2025b.app/bin/mex -R2017b
+
+MUMPS_DIR = $(HOME)/mumps_build/MUMPS_5.3.5
+
+LMETISDIR  = /opt/homebrew/opt/metis/lib
+LMETIS     = -L$(LMETISDIR) -lmetis
+LPORDDIR   = $(MUMPS_DIR)/PORD/lib
+LPORD      = -L$(LPORDDIR) -lpord
+LORDERINGS = $(LMETIS) $(LPORD)
+
+# gfortran runtime, needed because the MUMPS objects are Fortran
+LIBFORT = -L$(GFORTLIBDIR) -lgfortran -lquadmath
+
+# BLAS: Accelerate, passed as a linker flag
+LIBBLAS = LDFLAGS='$$LDFLAGS -framework Accelerate'
+
+OPTC = -O
